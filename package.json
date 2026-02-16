@@ -1,0 +1,14 @@
+{
+  "name": "mighty-men-game",
+  "version": "1.0.0",
+  "description": "A biblical-themed social deduction game inspired by Avalon",
+  "main": "src/worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

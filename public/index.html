@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Mighty Men of David</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --parchment: #f4e4bc;
+      --parchment-dark: #d4c4a0;
+      --ink: #2c1810;
+      --ink-light: #5c4030;
+      --gold: #c9a227;
+      --gold-dark: #8b7022;
+      --good: #1a5c3a;
+      --evil: #8b1a1a;
+      --accent: #6b4423;
+    }
+    
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    body {
+      font-family: 'Crimson Text', Georgia, serif;
+      background: linear-gradient(135deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+      background-attachment: fixed;
+      color: var(--ink);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    
+    .container {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    
+    h1, h2, h3 {
+      font-family: 'Cinzel', serif;
+      font-weight: 600;
+      margin: 0;
+    }
+    
+    h1 {
+      font-size: 1.8rem;
+      text-align: center;
+      color: var(--ink);
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+      margin-bottom: 8px;
+    }
+    
+    h2 {
+      font-size: 1.3rem;
+      margin-bottom: 12px;
+    }
+    
+    .subtitle {
+      text-align: center;
+      font-style: italic;
+      color: var(--ink-light);
+      margin-bottom: 24px;
+    }
+    
+    .card {
+      background: rgba(255, 255, 255, 0.7);
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    
+    .card-header {
+      border-bottom: 1px solid var(--parchment-dark);
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+    
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 16px;
+      font-family: 'Crimson Text', serif;
+      font-size: 1.1rem;
+      border: 2px solid var(--accent);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.9);
+      color: var(--ink);
+      margin-bottom: 12px;
+    }
+    
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.2);
+    }
+    
+    input[type="text"]::placeholder {
+      color: var(--ink-light);
+      opacity: 0.6;
+    }
+    
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px 20px;
+      font-family: 'Cinzel', serif;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+      color: white;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+    }
+    
+    .btn-primary:hover, .btn-primary:active {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(201, 162, 39, 0.4);
+    }
+    
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .btn-secondary {
+      background: transparent;
+      color: var(--accent);
+      border: 2px solid var(--accent);
+    }
+    
+    .btn-good {
+      background: linear-gradient(135deg, var(--good) 0%, #0d3d22 100%);
+      color: white;
+    }
+    
+    .btn-evil {
+      background: linear-gradient(135deg, var(--evil) 0%, #5c1111 100%);
+      color: white;
+    }
+    
+    .btn-sm {
+      padding: 10px 16px;
+      font-size: 0.9rem;
+    }
+    
+    .btn + .btn {
+      margin-top: 10px;
+    }
+    
+    .game-code {
+      text-align: center;
+      padding: 20px;
+      background: var(--ink);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    
+    .game-code-label {
+      font-family: 'Cinzel', serif;
+      color: var(--parchment);
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+    }
+    
+    .game-code-value {
+      font-family: 'Cinzel', serif;
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 8px;
+    }
+    
+    .qr-code {
+      display: flex;
+      justify-content: center;
+      margin: 16px 0;
+    }
+    
+    .qr-code canvas {
+      border: 4px solid var(--ink);
+      border-radius: 8px;
+    }
+    
+    .player-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    
+    .player-item {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border-bottom: 1px solid var(--parchment-dark);
+    }
+    
+    .player-item:last-child {
+      border-bottom: none;
+    }
+    
+    .player-name {
+      flex: 1;
+      font-size: 1.1rem;
+    }
+    
+    .player-badge {
+      font-family: 'Cinzel', serif;
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: var(--gold);
+      color: white;
+      margin-left: 8px;
+    }
+    
+    .player-badge.host {
+      background: var(--accent);
+    }
+    
+    .player-badge.leader {
+      background: var(--gold);
+    }
+    
+    .player-badge.you {
+      background: var(--good);
+    }
+    
+    .player-badge.voted {
+      background: var(--ink-light);
+    }
+    
+    .quest-track {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    
+    .quest-marker {
+      flex: 1;
+      text-align: center;
+      padding: 12px 8px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.5);
+      border: 2px solid var(--parchment-dark);
+    }
+    
+    .quest-marker.current {
+      border-color: var(--gold);
+      background: rgba(201, 162, 39, 0.2);
+    }
+    
+    .quest-marker.success {
+      background: var(--good);
+      border-color: var(--good);
+      color: white;
+    }
+    
+    .quest-marker.fail {
+      background: var(--evil);
+      border-color: var(--evil);
+      color: white;
+    }
+    
+    .quest-number {
+      font-family: 'Cinzel', serif;
+      font-weight: 700;
+      font-size: 1.2rem;
+    }
+    
+    .quest-size {
+      font-size: 0.8rem;
+      opacity: 0.8;
+    }
+    
+    .reject-track {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    
+    .reject-marker {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid var(--ink-light);
+      background: transparent;
+    }
+    
+    .reject-marker.active {
+      background: var(--evil);
+      border-color: var(--evil);
+    }
+    
+    .secret-reveal {
+      text-align: center;
+      padding: 30px 20px;
+      background: linear-gradient(135deg, var(--ink) 0%, #1a0f0a 100%);
+      border-radius: 8px;
+      color: var(--parchment);
+      margin-bottom: 16px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    
+    .secret-reveal.holding {
+      background: linear-gradient(135deg, #3a2a1a 0%, #2a1f15 100%);
+    }
+    
+    .secret-label {
+      font-family: 'Cinzel', serif;
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+      opacity: 0.8;
+    }
+    
+    .secret-content {
+      font-family: 'Cinzel', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--gold);
+    }
+    
+    .secret-hint {
+      font-size: 0.85rem;
+      opacity: 0.6;
+      margin-top: 12px;
+      font-style: italic;
+    }
+    
+    .role-good {
+      color: #4ade80;
+    }
+    
+    .role-evil {
+      color: #f87171;
+    }
+    
+    .sees-list {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.2);
+    }
+    
+    .sees-item {
+      padding: 8px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    .team-selector {
+      margin-bottom: 16px;
+    }
+    
+    .team-player {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border: 2px solid var(--parchment-dark);
+      border-radius: 6px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .team-player:hover {
+      border-color: var(--gold);
+    }
+    
+    .team-player.selected {
+      border-color: var(--good);
+      background: rgba(26, 92, 58, 0.1);
+    }
+    
+    .team-player .player-name {
+      flex: 1;
+    }
+    
+    .team-player .checkbox {
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--ink-light);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .team-player.selected .checkbox {
+      background: var(--good);
+      border-color: var(--good);
+      color: white;
+    }
+    
+    .vote-buttons {
+      display: flex;
+      gap: 12px;
+    }
+    
+    .vote-buttons .btn {
+      flex: 1;
+    }
+    
+    .vote-result {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    
+    .vote-result.approve {
+      background: rgba(26, 92, 58, 0.2);
+    }
+    
+    .vote-result.reject {
+      background: rgba(139, 26, 26, 0.2);
+    }
+    
+    .vote-result .player-name {
+      flex: 1;
+    }
+    
+    .vote-result .vote-icon {
+      font-size: 1.2rem;
+    }
+    
+    .phase-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .phase-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.4rem;
+      color: var(--ink);
+    }
+    
+    .phase-subtitle {
+      font-style: italic;
+      color: var(--ink-light);
+      margin-top: 4px;
+    }
+    
+    .message {
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    
+    .message.info {
+      background: rgba(107, 68, 35, 0.1);
+      border: 1px solid var(--accent);
+    }
+    
+    .message.success {
+      background: rgba(26, 92, 58, 0.1);
+      border: 1px solid var(--good);
+    }
+    
+    .message.error {
+      background: rgba(139, 26, 26, 0.1);
+      border: 1px solid var(--evil);
+    }
+    
+    .message.waiting {
+      background: rgba(201, 162, 39, 0.1);
+      border: 1px solid var(--gold);
+    }
+    
+    .result-banner {
+      text-align: center;
+      padding: 30px 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    
+    .result-banner.good-wins {
+      background: linear-gradient(135deg, var(--good) 0%, #0d3d22 100%);
+      color: white;
+    }
+    
+    .result-banner.evil-wins {
+      background: linear-gradient(135deg, var(--evil) 0%, #5c1111 100%);
+      color: white;
+    }
+    
+    .result-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    
+    .result-reason {
+      opacity: 0.9;
+    }
+    
+    .roles-reveal {
+      margin-top: 20px;
+    }
+    
+    .role-reveal-item {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border-bottom: 1px solid var(--parchment-dark);
+    }
+    
+    .role-reveal-item .player-name {
+      flex: 1;
+    }
+    
+    .role-reveal-item .role-name {
+      font-family: 'Cinzel', serif;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 4px;
+    }
+    
+    .role-reveal-item .role-name.good {
+      background: var(--good);
+      color: white;
+    }
+    
+    .role-reveal-item .role-name.evil {
+      background: var(--evil);
+      color: white;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--ink-light);
+    }
+    
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--parchment-dark);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .team-preview {
+      margin-bottom: 16px;
+    }
+    
+    .team-preview-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    
+    .team-member-badge {
+      padding: 8px 16px;
+      background: var(--ink);
+      color: var(--parchment);
+      border-radius: 20px;
+      font-family: 'Cinzel', serif;
+    }
+    
+    .assassination-target {
+      cursor: pointer;
+      padding: 16px;
+      border: 2px solid var(--parchment-dark);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      transition: all 0.2s ease;
+    }
+    
+    .assassination-target:hover {
+      border-color: var(--evil);
+    }
+    
+    .assassination-target.selected {
+      border-color: var(--evil);
+      background: rgba(139, 26, 26, 0.1);
+    }
+    
+    @media (max-width: 360px) {
+      .container {
+        padding: 12px;
+      }
+      
+      h1 {
+        font-size: 1.5rem;
+      }
+      
+      .game-code-value {
+        font-size: 2rem;
+        letter-spacing: 4px;
+      }
+      
+      .quest-marker {
+        padding: 8px 4px;
+      }
+      
+      .quest-number {
+        font-size: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Home Screen -->
+    <div id="screen-home">
+      <h1>Mighty Men of David</h1>
+      <p class="subtitle">A game of loyalty and deception</p>
+      
+      <div class="card">
+        <h2>Create New Game</h2>
+        <input type="text" id="host-name" placeholder="Enter your name" maxlength="20">
+        <button class="btn btn-primary" id="btn-create">Create Game</button>
+      </div>
+      
+      <div class="card">
+        <h2>Join Game</h2>
+        <input type="text" id="join-code" placeholder="Game code" maxlength="6" style="text-transform: uppercase;">
+        <input type="text" id="join-name" placeholder="Enter your name" maxlength="20">
+        <button class="btn btn-primary" id="btn-join">Join Game</button>
+      </div>
+      
+      <div id="rejoin-section" class="card hidden">
+        <h2>Rejoin Game</h2>
+        <p id="rejoin-info"></p>
+        <button class="btn btn-secondary" id="btn-rejoin">Rejoin</button>
+      </div>
+    </div>
+    
+    <!-- Lobby Screen -->
+    <div id="screen-lobby" class="hidden">
+      <h1>Mighty Men of David</h1>
+      
+      <div class="game-code">
+        <div class="game-code-label">Game Code</div>
+        <div class="game-code-value" id="lobby-code"></div>
+      </div>
+      
+      <div class="qr-code" id="qr-container">
+        <canvas id="qr-canvas"></canvas>
+        <div id="qr-fallback" class="hidden" style="padding: 20px; background: white; border-radius: 8px; font-size: 0.9rem; text-align: center;">
+          Scan the code or enter it manually
+        </div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <h2>Players (<span id="player-count">0</span>/12)</h2>
+        </div>
+        <ul class="player-list" id="lobby-players"></ul>
+      </div>
+      
+      <div id="host-controls" class="hidden">
+        <button class="btn btn-primary" id="btn-start" disabled>
+          Start Game (Need 6+ players)
+        </button>
+      </div>
+      
+      <div id="waiting-message" class="message waiting">
+        Waiting for host to start the game...
+      </div>
+    </div>
+    
+    <!-- Game Screen -->
+    <div id="screen-game" class="hidden">
+      <div class="quest-track" id="quest-track"></div>
+      
+      <div class="reject-track" id="reject-track">
+        <div class="reject-marker"></div>
+        <div class="reject-marker"></div>
+        <div class="reject-marker"></div>
+        <div class="reject-marker"></div>
+        <div class="reject-marker"></div>
+      </div>
+      
+      <!-- Role reveal (hold to see) -->
+      <div class="secret-reveal" id="role-reveal">
+        <div class="secret-label">Your Identity</div>
+        <div class="secret-content" id="role-content">Hold to reveal</div>
+        <div class="secret-hint">Press and hold to see your role</div>
+      </div>
+      
+      <!-- Phase-specific content -->
+      <div id="phase-content"></div>
+    </div>
+    
+    <!-- Game Over Screen -->
+    <div id="screen-gameover" class="hidden">
+      <div class="result-banner" id="result-banner">
+        <div class="result-title" id="result-title"></div>
+        <div class="result-reason" id="result-reason"></div>
+      </div>
+      
+      <div class="card">
+        <h2>Final Roles</h2>
+        <div class="roles-reveal" id="roles-reveal"></div>
+      </div>
+      
+      <button class="btn btn-primary" id="btn-new-game">New Game</button>
+    </div>
+  </div>
+  
+  <!-- QR Code Library -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  
+  <script>
+    // Game state
+    let gameState = null;
+    let playerId = null;
+    let gameCode = null;
+    let playerKnowledge = null;
+    let pollInterval = null;
+    let isHoldingRole = false;
+    let lastVotes = null;
+    
+    const ROLE_NAMES = {
+      samuel: 'Samuel',
+      david: 'David',
+      mighty_man: 'Mighty Man',
+      saul: 'Saul',
+      phinehas: 'Phinehas',
+      doeg: 'Doeg',
+      sheep: 'Sheep of Saul'
+    };
+    
+    const ROLE_DESCRIPTIONS = {
+      samuel: 'You know the servants of evil (except Saul)',
+      david: 'You see Samuel and Phinehas but cannot tell them apart',
+      mighty_man: 'You are loyal but have no special knowledge',
+      saul: 'Leader of evil. Hidden from Samuel. You can assassinate Samuel at the end.',
+      phinehas: 'You appear to David as possibly Samuel',
+      doeg: 'You are evil but work alone - you don\'t know your allies',
+      sheep: 'You know your evil allies (except Doeg)'
+    };
+    
+    // API calls
+    async function api(endpoint, data = {}) {
+      const response = await fetch(`/api/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      const result = await response.json();
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Request failed');
+      }
+      return result;
+    }
+    
+    // Screen management
+    function showScreen(screenId) {
+      document.querySelectorAll('[id^="screen-"]').forEach(el => {
+        el.classList.add('hidden');
+      });
+      document.getElementById(screenId).classList.remove('hidden');
+    }
+    
+    // Local storage for rejoin
+    function saveSession(code, id) {
+      localStorage.setItem('mightymen_game', JSON.stringify({ code, playerId: id }));
+    }
+    
+    function loadSession() {
+      try {
+        return JSON.parse(localStorage.getItem('mightymen_game'));
+      } catch {
+        return null;
+      }
+    }
+    
+    function clearSession() {
+      localStorage.removeItem('mightymen_game');
+    }
+    
+    // Check for existing session on load
+    function checkExistingSession() {
+      const session = loadSession();
+      if (session) {
+        document.getElementById('rejoin-section').classList.remove('hidden');
+        document.getElementById('rejoin-info').textContent = 
+          `Game: ${session.code}`;
+      }
+    }
+    
+    // Sound for attention
+    function playAttentionSound() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 440;
+        gain.gain.value = 0.3;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.stop(ctx.currentTime + 0.3);
+      } catch (e) {
+        // Audio not supported
+      }
+    }
+    
+    // Generate QR code
+    function generateQRCode(url) {
+      const canvas = document.getElementById('qr-canvas');
+      QRCode.toCanvas(canvas, url, {
+        width: 180,
+        margin: 2,
+        color: {
+          dark: '#2c1810',
+          light: '#f4e4bc'
+        }
+      });
+    }
+    
+    // Create game
+    async function createGame() {
+      const name = document.getElementById('host-name').value.trim();
+      if (!name) {
+        alert('Please enter your name');
+        return;
+      }
+      
+      try {
+        const result = await api('create', { name });
+        gameCode = result.gameCode;
+        playerId = result.playerId;
+        saveSession(gameCode, playerId);
+        showLobby();
+        startPolling();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+    
+    // Join game
+    async function joinGame() {
+      const code = document.getElementById('join-code').value.trim().toUpperCase();
+      const name = document.getElementById('join-name').value.trim();
+      
+      if (!code || !name) {
+        alert('Please enter game code and your name');
+        return;
+      }
+      
+      try {
+        const result = await api('join', { code, name });
+        gameCode = result.gameCode;
+        playerId = result.playerId;
+        saveSession(gameCode, playerId);
+        showLobby();
+        startPolling();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+    
+    // Rejoin game
+    async function rejoinGame() {
+      const session = loadSession();
+      if (!session) return;
+      
+      try {
+        const result = await api('rejoin', { 
+          code: session.code, 
+          playerId: session.playerId 
+        });
+        gameCode = result.gameCode;
+        playerId = result.playerId;
+        
+        // Get initial state to determine which screen to show
+        const stateResult = await api('state', { code: gameCode, playerId });
+        gameState = stateResult.state;
+        
+        if (gameState.phase === 'lobby') {
+          showLobby();
+        }
+        
+        startPolling();
+      } catch (error) {
+        alert('Could not rejoin game: ' + error.message);
+        clearSession();
+        document.getElementById('rejoin-section').classList.add('hidden');
+      }
+    }
+    
+    // Show lobby
+    function showLobby() {
+      showScreen('screen-lobby');
+      document.getElementById('lobby-code').textContent = gameCode;
+      const joinUrl = window.location.origin + '?join=' + gameCode;
+      
+      // Generate QR code
+      const canvas = document.getElementById('qr-canvas');
+      const fallback = document.getElementById('qr-fallback');
+      
+      if (typeof QRCode !== 'undefined') {
+        QRCode.toCanvas(canvas, joinUrl, {
+          width: 180,
+          margin: 2,
+          color: {
+            dark: '#2c1810',
+            light: '#f4e4bc'
+          }
+        }, function(error) {
+          if (error) {
+            console.error('QR Code error:', error);
+            canvas.classList.add('hidden');
+            fallback.classList.remove('hidden');
+          } else {
+            canvas.classList.remove('hidden');
+            fallback.classList.add('hidden');
+          }
+        });
+      } else {
+        console.warn('QRCode library not loaded');
+        canvas.classList.add('hidden');
+        fallback.classList.remove('hidden');
+      }
+    }
+    
+    // Update lobby UI
+    function updateLobby(state) {
+      document.getElementById('player-count').textContent = state.playerCount;
+      
+      const playerList = document.getElementById('lobby-players');
+      playerList.innerHTML = state.players.map(p => `
+        <li class="player-item">
+          <span class="player-name">${escapeHtml(p.name)}</span>
+          ${p.isHost ? '<span class="player-badge host">Host</span>' : ''}
+          ${p.id === playerId ? '<span class="player-badge you">You</span>' : ''}
+        </li>
+      `).join('');
+      
+      const hostControls = document.getElementById('host-controls');
+      const waitingMessage = document.getElementById('waiting-message');
+      
+      if (state.isHost) {
+        hostControls.classList.remove('hidden');
+        waitingMessage.classList.add('hidden');
+        
+        const startBtn = document.getElementById('btn-start');
+        startBtn.disabled = state.playerCount < 6;
+        startBtn.textContent = state.playerCount < 6 
+          ? `Start Game (Need ${6 - state.playerCount} more)`
+          : 'Start Game';
+      } else {
+        hostControls.classList.add('hidden');
+        waitingMessage.classList.remove('hidden');
+      }
+    }
+    
+    // Start game
+    async function startGame() {
+      try {
+        await api('start', { code: gameCode, playerId });
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+    
+    // Fetch player knowledge
+    async function fetchKnowledge() {
+      try {
+        const result = await api('knowledge', { code: gameCode, playerId });
+        playerKnowledge = result.knowledge;
+      } catch (error) {
+        console.error('Failed to fetch knowledge:', error);
+      }
+    }
+    
+    // Setup role reveal (hold to see)
+    function setupRoleReveal() {
+      const reveal = document.getElementById('role-reveal');
+      const content = document.getElementById('role-content');
+      
+      let holdTimeout;
+      
+      function showRole() {
+        if (!playerKnowledge) return;
+        
+        isHoldingRole = true;
+        reveal.classList.add('holding');
+        
+        const roleName = ROLE_NAMES[playerKnowledge.role];
+        const roleClass = playerKnowledge.isEvil ? 'role-evil' : 'role-good';
+        
+        let html = `<span class="${roleClass}">${roleName}</span>`;
+        html += `<div class="secret-hint">${ROLE_DESCRIPTIONS[playerKnowledge.role]}</div>`;
+        
+        if (playerKnowledge.sees.length > 0) {
+          html += '<div class="sees-list">';
+          playerKnowledge.sees.forEach(p => {
+            html += `<div class="sees-item"><span>${escapeHtml(p.name)}</span><span>${p.label}</span></div>`;
+          });
+          html += '</div>';
+        }
+        
+        content.innerHTML = html;
+      }
+      
+      function hideRole() {
+        isHoldingRole = false;
+        reveal.classList.remove('holding');
+        content.innerHTML = 'Hold to reveal';
+      }
+      
+      reveal.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        showRole();
+      });
+      
+      reveal.addEventListener('touchend', hideRole);
+      reveal.addEventListener('touchcancel', hideRole);
+      
+      reveal.addEventListener('mousedown', showRole);
+      reveal.addEventListener('mouseup', hideRole);
+      reveal.addEventListener('mouseleave', hideRole);
+    }
+    
+    // Update quest track
+    function updateQuestTrack(state) {
+      const track = document.getElementById('quest-track');
+      track.innerHTML = state.questSizes.map((size, i) => {
+        let className = 'quest-marker';
+        let icon = '';
+        
+        if (state.questResults[i]) {
+          className += state.questResults[i].success ? ' success' : ' fail';
+          icon = state.questResults[i].success ? '✓' : '✗';
+        } else if (i === state.currentQuest) {
+          className += ' current';
+        }
+        
+        const failReq = state.questFailRequirements[i];
+        const failNote = failReq > 1 ? ` (${failReq}✗)` : '';
+        
+        return `
+          <div class="${className}">
+            <div class="quest-number">${icon || (i + 1)}</div>
+            <div class="quest-size">${size}${failNote}</div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    // Update reject track
+    function updateRejectTrack(rejectCount) {
+      const markers = document.querySelectorAll('#reject-track .reject-marker');
+      markers.forEach((marker, i) => {
+        marker.classList.toggle('active', i < rejectCount);
+      });
+    }
+    
+    // Render phase content
+    function renderPhaseContent(state) {
+      const container = document.getElementById('phase-content');
+      
+      switch (state.phase) {
+        case 'team_selection':
+          renderTeamSelection(container, state);
+          break;
+        case 'team_vote':
+          renderTeamVote(container, state);
+          break;
+        case 'quest':
+          renderQuest(container, state);
+          break;
+        case 'assassination':
+          renderAssassination(container, state);
+          break;
+      }
+    }
+    
+    // Team selection phase
+    function renderTeamSelection(container, state) {
+      const questSize = state.questSizes[state.currentQuest];
+      
+      if (state.isLeader) {
+        container.innerHTML = `
+          <div class="phase-header">
+            <div class="phase-title">Select Your Team</div>
+            <div class="phase-subtitle">Choose ${questSize} members for Quest ${state.currentQuest + 1}</div>
+          </div>
+          <div class="team-selector" id="team-selector">
+            ${state.players.map(p => `
+              <div class="team-player" data-id="${p.id}">
+                <span class="player-name">${escapeHtml(p.name)}</span>
+                ${p.id === playerId ? '<span class="player-badge you">You</span>' : ''}
+                <div class="checkbox">✓</div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-primary" id="btn-propose" disabled>
+            Propose Team (0/${questSize})
+          </button>
+        `;
+        
+        setupTeamSelector(questSize);
+      } else {
+        container.innerHTML = `
+          <div class="phase-header">
+            <div class="phase-title">Team Selection</div>
+            <div class="phase-subtitle">${escapeHtml(state.leaderName)} is choosing ${questSize} members</div>
+          </div>
+          <div class="message waiting">
+            Waiting for the leader to propose a team...
+          </div>
+        `;
+      }
+    }
+    
+    // Setup team selector
+    function setupTeamSelector(questSize) {
+      const selector = document.getElementById('team-selector');
+      const proposeBtn = document.getElementById('btn-propose');
+      const selected = new Set();
+      
+      selector.querySelectorAll('.team-player').forEach(el => {
+        el.addEventListener('click', () => {
+          const id = el.dataset.id;
+          
+          if (selected.has(id)) {
+            selected.delete(id);
+            el.classList.remove('selected');
+          } else if (selected.size < questSize) {
+            selected.add(id);
+            el.classList.add('selected');
+          }
+          
+          proposeBtn.disabled = selected.size !== questSize;
+          proposeBtn.textContent = `Propose Team (${selected.size}/${questSize})`;
+        });
+      });
+      
+      proposeBtn.addEventListener('click', async () => {
+        try {
+          await api('propose', { 
+            code: gameCode, 
+            playerId, 
+            team: Array.from(selected) 
+          });
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+    }
+    
+    // Team vote phase
+    function renderTeamVote(container, state) {
+      const teamNames = state.proposedTeam.map(id => {
+        const p = state.players.find(p => p.id === id);
+        return p ? p.name : 'Unknown';
+      });
+      
+      let html = `
+        <div class="phase-header">
+          <div class="phase-title">Vote on Team</div>
+          <div class="phase-subtitle">Proposed by ${escapeHtml(state.leaderName)}</div>
+        </div>
+        <div class="team-preview">
+          <div class="team-preview-list">
+            ${teamNames.map(name => `
+              <span class="team-member-badge">${escapeHtml(name)}</span>
+            `).join('')}
+          </div>
+        </div>
+      `;
+      
+      if (state.hasVoted) {
+        html += `
+          <div class="message waiting">
+            Waiting for others to vote...
+          </div>
+          <div class="card">
+            <h3>Voted</h3>
+            <ul class="player-list">
+              ${state.players.map(p => `
+                <li class="player-item">
+                  <span class="player-name">${escapeHtml(p.name)}</span>
+                  ${state.votedPlayers.includes(p.id) 
+                    ? '<span class="player-badge voted">Voted</span>' 
+                    : ''}
+                </li>
+              `).join('')}
+            </ul>
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="vote-buttons">
+            <button class="btn btn-good" id="btn-approve">Approve</button>
+            <button class="btn btn-evil" id="btn-reject">Reject</button>
+          </div>
+        `;
+      }
+      
+      container.innerHTML = html;
+      
+      if (!state.hasVoted) {
+        document.getElementById('btn-approve').addEventListener('click', () => submitVote(true));
+        document.getElementById('btn-reject').addEventListener('click', () => submitVote(false));
+      }
+    }
+    
+    // Submit vote
+    async function submitVote(approve) {
+      try {
+        await api('vote', { code: gameCode, playerId, approve });
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+    
+    // Quest phase
+    function renderQuest(container, state) {
+      const onTeam = state.isOnTeam;
+      
+      let html = `
+        <div class="phase-header">
+          <div class="phase-title">Quest ${state.currentQuest + 1}</div>
+          <div class="phase-subtitle">The team embarks on their mission</div>
+        </div>
+      `;
+      
+      if (onTeam) {
+        if (state.hasQuestVoted) {
+          html += `
+            <div class="message waiting">
+              Waiting for other team members...
+            </div>
+          `;
+        } else {
+          const canFail = playerKnowledge && playerKnowledge.isEvil;
+          html += `
+            <div class="message info">
+              You are on this quest. Choose your action.
+            </div>
+            <div class="vote-buttons">
+              <button class="btn btn-good" id="btn-success">Success</button>
+              ${canFail ? '<button class="btn btn-evil" id="btn-fail">Fail</button>' : ''}
+            </div>
+          `;
+        }
+      } else {
+        html += `
+          <div class="message waiting">
+            Waiting for the team to complete the quest...
+          </div>
+        `;
+      }
+      
+      html += `
+        <div class="card">
+          <h3>Quest Progress</h3>
+          <ul class="player-list">
+            ${state.proposedTeam.map(id => {
+              const p = state.players.find(p => p.id === id);
+              const voted = state.questVotedPlayers?.includes(id);
+              return `
+                <li class="player-item">
+                  <span class="player-name">${escapeHtml(p?.name || 'Unknown')}</span>
+                  ${voted ? '<span class="player-badge voted">Done</span>' : ''}
+                </li>
+              `;
+            }).join('')}
+          </ul>
+        </div>
+      `;
+      
+      container.innerHTML = html;
+      
+      if (onTeam && !state.hasQuestVoted) {
+        document.getElementById('btn-success').addEventListener('click', () => submitQuestVote(true));
+        const failBtn = document.getElementById('btn-fail');
+        if (failBtn) {
+          failBtn.addEventListener('click', () => submitQuestVote(false));
+        }
+      }
+    }
+    
+    // Submit quest vote
+    async function submitQuestVote(success) {
+      try {
+        await api('quest', { code: gameCode, playerId, success });
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+    
+    // Assassination phase
+    function renderAssassination(container, state) {
+      if (state.isSaul) {
+        container.innerHTML = `
+          <div class="phase-header">
+            <div class="phase-title">Assassination</div>
+            <div class="phase-subtitle">The forces of good have won three quests, but you have one chance...</div>
+          </div>
+          <div class="message info">
+            You are Saul. Identify and eliminate Samuel to win!
+          </div>
+          <div id="assassination-targets">
+            ${state.players.filter(p => p.id !== playerId).map(p => `
+              <div class="assassination-target" data-id="${p.id}">
+                <span class="player-name">${escapeHtml(p.name)}</span>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-evil" id="btn-assassinate" disabled>
+            Eliminate Target
+          </button>
+        `;
+        
+        setupAssassination();
+      } else {
+        container.innerHTML = `
+          <div class="phase-header">
+            <div class="phase-title">Assassination</div>
+            <div class="phase-subtitle">The forces of good have won three quests...</div>
+          </div>
+          <div class="message waiting">
+            Saul is choosing a target...
+          </div>
+        `;
+      }
+    }
+    
+    // Setup assassination selection
+    function setupAssassination() {
+      const targets = document.getElementById('assassination-targets');
+      const assassinateBtn = document.getElementById('btn-assassinate');
+      let selectedTarget = null;
+      
+      targets.querySelectorAll('.assassination-target').forEach(el => {
+        el.addEventListener('click', () => {
+          targets.querySelectorAll('.assassination-target').forEach(t => {
+            t.classList.remove('selected');
+          });
+          el.classList.add('selected');
+          selectedTarget = el.dataset.id;
+          assassinateBtn.disabled = false;
+        });
+      });
+      
+      assassinateBtn.addEventListener('click', async () => {
+        if (!selectedTarget) return;
+        
+        if (!confirm('Are you sure you want to eliminate this person?')) return;
+        
+        try {
+          await api('assassinate', { 
+            code: gameCode, 
+            playerId, 
+            targetId: selectedTarget 
+          });
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+    }
+    
+    // Show game over
+    function showGameOver(state) {
+      showScreen('screen-gameover');
+      
+      const banner = document.getElementById('result-banner');
+      const title = document.getElementById('result-title');
+      const reason = document.getElementById('result-reason');
+      
+      banner.className = 'result-banner ' + (state.winner === 'good' ? 'good-wins' : 'evil-wins');
+      title.textContent = state.winner === 'good' 
+        ? 'The Righteous Prevail!' 
+        : 'Evil Triumphs!';
+      reason.textContent = state.winReason;
+      
+      const rolesReveal = document.getElementById('roles-reveal');
+      rolesReveal.innerHTML = state.players.map(p => {
+        const isEvil = ['saul', 'phinehas', 'doeg', 'sheep'].includes(p.role);
+        return `
+          <div class="role-reveal-item">
+            <span class="player-name">${escapeHtml(p.name)}</span>
+            <span class="role-name ${isEvil ? 'evil' : 'good'}">
+              ${ROLE_NAMES[p.role]}
+            </span>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    // Polling
+    function startPolling() {
+      if (pollInterval) clearInterval(pollInterval);
+      
+      pollInterval = setInterval(async () => {
+        try {
+          const result = await api('state', { code: gameCode, playerId });
+          const newState = result.state;
+          
+          // Check for phase changes that need attention
+          if (gameState) {
+            const phaseChanged = gameState.phase !== newState.phase;
+            const needsAction = 
+              (newState.phase === 'team_vote' && !newState.hasVoted) ||
+              (newState.phase === 'quest' && newState.isOnTeam && !newState.hasQuestVoted) ||
+              (newState.phase === 'assassination' && newState.isSaul);
+            
+            if (phaseChanged && needsAction) {
+              playAttentionSound();
+            }
+          }
+          
+          gameState = newState;
+          updateUI();
+        } catch (error) {
+          console.error('Poll error:', error);
+        }
+      }, 1000);
+    }
+    
+    function stopPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }
+    
+    // Update UI based on state
+    async function updateUI() {
+      if (!gameState) return;
+      
+      switch (gameState.phase) {
+        case 'lobby':
+          showScreen('screen-lobby');
+          updateLobby(gameState);
+          break;
+          
+        case 'team_selection':
+        case 'team_vote':
+        case 'quest':
+        case 'assassination':
+          showScreen('screen-game');
+          if (!playerKnowledge) {
+            await fetchKnowledge();
+          }
+          updateQuestTrack(gameState);
+          updateRejectTrack(gameState.rejectCount);
+          renderPhaseContent(gameState);
+          break;
+          
+        case 'game_over':
+          stopPolling();
+          showGameOver(gameState);
+          break;
+      }
+    }
+    
+    // Utility
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      // Check URL for join code
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = params.get('join');
+      if (joinCode) {
+        document.getElementById('join-code').value = joinCode;
+      }
+      
+      // Check for existing session
+      checkExistingSession();
+      
+      // Setup role reveal
+      setupRoleReveal();
+      
+      // Event listeners
+      document.getElementById('btn-create').addEventListener('click', createGame);
+      document.getElementById('btn-join').addEventListener('click', joinGame);
+      document.getElementById('btn-rejoin').addEventListener('click', rejoinGame);
+      document.getElementById('btn-start').addEventListener('click', startGame);
+      document.getElementById('btn-new-game').addEventListener('click', () => {
+        clearSession();
+        location.reload();
+      });
+      
+      // Enter key handlers
+      document.getElementById('host-name').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') createGame();
+      });
+      document.getElementById('join-name').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') joinGame();
+      });
+    });
+  </script>
+</body>
+</html>

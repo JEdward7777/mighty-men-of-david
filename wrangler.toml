@@ -1,0 +1,14 @@
+name = "mighty-men-game"
+main = "src/worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GAME_EXPIRY_SECONDS = "7200"  # 2 hours
+
+[[kv_namespaces]]
+binding = "GAMES"
+id = "placeholder_id"
+preview_id = "placeholder_preview_id"
+
+[site]
+bucket = "./public"
