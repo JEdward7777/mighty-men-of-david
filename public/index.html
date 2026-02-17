@@ -1653,34 +1653,37 @@
       }).join('');
     }
     
+    // Poll game state once
+    async function pollGameState() {
+      try {
+        const result = await api('state', { code: gameCode, playerId });
+        const newState = result.state;
+        
+        // Check for phase changes that need attention
+        if (gameState) {
+          const phaseChanged = gameState.phase !== newState.phase;
+          const needsAction = 
+            (newState.phase === 'team_vote' && !newState.hasVoted) ||
+            (newState.phase === 'quest' && newState.isOnTeam && !newState.hasQuestVoted) ||
+            (newState.phase === 'assassination' && newState.isSaul);
+          
+          if (phaseChanged && needsAction) {
+            playAttentionSound();
+          }
+        }
+        
+        gameState = newState;
+        updateUI();
+      } catch (error) {
+        console.error('Poll error:', error);
+      }
+    }
+    
     // Polling
     function startPolling() {
       if (pollInterval) clearInterval(pollInterval);
       
-      pollInterval = setInterval(async () => {
-        try {
-          const result = await api('state', { code: gameCode, playerId });
-          const newState = result.state;
-          
-          // Check for phase changes that need attention
-          if (gameState) {
-            const phaseChanged = gameState.phase !== newState.phase;
-            const needsAction = 
-              (newState.phase === 'team_vote' && !newState.hasVoted) ||
-              (newState.phase === 'quest' && newState.isOnTeam && !newState.hasQuestVoted) ||
-              (newState.phase === 'assassination' && newState.isSaul);
-            
-            if (phaseChanged && needsAction) {
-              playAttentionSound();
-            }
-          }
-          
-          gameState = newState;
-          updateUI();
-        } catch (error) {
-          console.error('Poll error:', error);
-        }
-      }, 1000);
+      pollInterval = setInterval(pollGameState, 1000);
     }
     
     function stopPolling() {
