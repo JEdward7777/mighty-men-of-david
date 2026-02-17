@@ -1510,8 +1510,13 @@
     
     // Vote result phase - show how everyone voted
     function renderVoteResult(container, state) {
+      console.log('[UI] renderVoteResult called, state:', state);
       const result = state.lastVoteResult;
-      if (!result) return;
+      if (!result) {
+        console.error('[UI] lastVoteResult is missing!', state);
+        container.innerHTML = '<div class="message error">Loading vote results...</div>';
+        return;
+      }
       
       const isApproved = result.approved;
       
@@ -1820,9 +1825,14 @@
         const result = await api('state', { code: gameCode, playerId });
         const newState = result.state;
         
+        console.log('[POLL] Got state, phase:', newState.phase);
+        
         // Check for phase changes that need attention
         if (gameState) {
           const phaseChanged = gameState.phase !== newState.phase;
+          if (phaseChanged) {
+            console.log('[POLL] Phase changed from', gameState.phase, 'to', newState.phase);
+          }
           const needsAction = 
             (newState.phase === 'team_vote' && !newState.hasVoted) ||
             (newState.phase === 'quest' && newState.isOnTeam && !newState.hasQuestVoted) ||
@@ -1866,7 +1876,9 @@
           
         case 'team_selection':
         case 'team_vote':
+        case 'vote_result':
         case 'quest':
+        case 'quest_result':
         case 'assassination':
           showScreen('screen-game');
           if (!playerKnowledge) {

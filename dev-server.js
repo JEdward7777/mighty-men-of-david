@@ -6,6 +6,28 @@ const path = require('path');
 // In-memory KV store for development
 const kvStore = new Map();
 
+// Locks for preventing race conditions on game state
+const gameLocks = new Map();
+
+async function withGameLock(gameCode, fn) {
+  const code = gameCode.toUpperCase();
+  
+  // Wait for any existing lock
+  while (gameLocks.get(code)) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  
+  // Acquire lock
+  gameLocks.set(code, true);
+  
+  try {
+    return await fn();
+  } finally {
+    // Release lock
+    gameLocks.delete(code);
+  }
+}
+
 // Mock environment
 const env = {
   GAME_EXPIRY_SECONDS: '7200',
@@ -551,51 +573,65 @@ async function handleApiRequest(path, body) {
       throw new Error('Game code, player ID, and vote are required');
     }
     
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    
-    if (game.phase !== GAME_PHASES.TEAM_VOTE) {
-      throw new Error('Not in voting phase');
-    }
-    
-    if (!game.players.some(p => p.id === playerId)) {
-      throw new Error('Player not found');
-    }
-    
-    if (game.votes[playerId] !== undefined) {
-      throw new Error('Already voted');
-    }
-    
-    game.votes[playerId] = !!approve;
-    game.updatedAt = Date.now();
-    
-    if (Object.keys(game.votes).length === game.players.length) {
-      const approveCount = Object.values(game.votes).filter(v => v).length;
-      const rejectCount = game.players.length - approveCount;
-      const approved = approveCount > game.players.length / 2;
+    // Use lock to prevent race conditions when multiple players vote simultaneously
+    return await withGameLock(code, async () => {
+      const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+      if (!gameData) {
+        throw new Error('Game not found');
+      }
       
-      // Store the vote result for display
-      game.lastVoteResult = {
-        approved: approved,
-        approveCount: approveCount,
-        rejectCount: rejectCount,
-        votes: { ...game.votes }, // Copy the votes so we can show who voted what
-        team: [...game.proposedTeam]
-      };
+      const game = JSON.parse(gameData);
       
-      // Go to vote result phase to show the outcome
-      game.phase = GAME_PHASES.VOTE_RESULT;
-    }
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: parseInt(env.GAME_EXPIRY_SECONDS)
+      // Debug logging
+      console.log(`[VOTE] Player ${playerId} voting. Phase: ${game.phase}, Players: ${game.players.length}, Votes so far: ${Object.keys(game.votes).length}`);
+      console.log(`[VOTE] Player IDs: ${game.players.map(p => p.id).join(', ')}`);
+      console.log(`[VOTE] Votes: ${JSON.stringify(game.votes)}`);
+      
+      if (game.phase !== GAME_PHASES.TEAM_VOTE) {
+        console.log(`[VOTE ERROR] Not in voting phase. Current phase: ${game.phase}`);
+        throw new Error(`Not in voting phase (current phase: ${game.phase})`);
+      }
+      
+      if (!game.players.some(p => p.id === playerId)) {
+        console.log(`[VOTE ERROR] Player ${playerId} not found in game`);
+        throw new Error('Player not found');
+      }
+      
+      if (game.votes[playerId] !== undefined) {
+        console.log(`[VOTE ERROR] Player ${playerId} already voted`);
+        throw new Error('Already voted');
+      }
+      
+      game.votes[playerId] = !!approve;
+      game.updatedAt = Date.now();
+      
+      console.log(`[VOTE] After vote - Votes: ${Object.keys(game.votes).length}, Players: ${game.players.length}`);
+      
+      if (Object.keys(game.votes).length === game.players.length) {
+        console.log(`[VOTE] All votes in! Transitioning to VOTE_RESULT`);
+        const approveCount = Object.values(game.votes).filter(v => v).length;
+        const rejectCount = game.players.length - approveCount;
+        const approved = approveCount > game.players.length / 2;
+        
+        // Store the vote result for display
+        game.lastVoteResult = {
+          approved: approved,
+          approveCount: approveCount,
+          rejectCount: rejectCount,
+          votes: { ...game.votes }, // Copy the votes so we can show who voted what
+          team: [...game.proposedTeam]
+        };
+        
+        // Go to vote result phase to show the outcome
+        game.phase = GAME_PHASES.VOTE_RESULT;
+      }
+      
+      await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+        expirationTtl: parseInt(env.GAME_EXPIRY_SECONDS)
+      });
+      
+      return { success: true };
     });
-    
-    return { success: true };
   }
   
   // Continue from vote result phase
