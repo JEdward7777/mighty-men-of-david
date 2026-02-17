@@ -175,20 +175,11 @@ function getPlayerKnowledge(game, playerId) {
       break;
       
     case ROLES.SAUL:
-      knowledge.sees = game.players
-        .filter(p => isEvil(p.role) && p.role !== ROLES.DOEG && p.id !== playerId)
-        .map(p => ({ id: p.id, name: p.name, label: 'Evil Ally' }));
-      break;
-      
     case ROLES.PHINEHAS:
-      knowledge.sees = game.players
-        .filter(p => isEvil(p.role) && p.role !== ROLES.DOEG && p.id !== playerId)
-        .map(p => ({ id: p.id, name: p.name, label: 'Evil Ally' }));
-      break;
-      
     case ROLES.SHEEP:
+      // Evil players (except Doeg) see all other evil players except Doeg
       knowledge.sees = game.players
-        .filter(p => isEvil(p.role) && p.role !== ROLES.DOEG && p.id !== playerId)
+        .filter(p => p.id !== playerId && isEvil(p.role) && p.role !== ROLES.DOEG)
         .map(p => ({ id: p.id, name: p.name, label: 'Evil Ally' }));
       break;
       

@@ -669,9 +669,10 @@
       </div>
       
       <div class="qr-code" id="qr-container">
-        <canvas id="qr-canvas"></canvas>
-        <div id="qr-fallback" class="hidden" style="padding: 20px; background: white; border-radius: 8px; font-size: 0.9rem; text-align: center;">
-          Scan the code or enter it manually
+        <div id="qr-canvas"></div>
+        <div id="qr-fallback" class="hidden" style="padding: 16px; background: white; border-radius: 8px; font-size: 0.85rem; text-align: center; max-width: 280px; word-break: break-all;">
+          <div style="margin-bottom: 8px; font-weight: 600;">Share this link:</div>
+          <div id="qr-fallback-url" style="color: var(--accent);"></div>
         </div>
       </div>
       
@@ -732,8 +733,8 @@
     </div>
   </div>
   
-  <!-- QR Code Library -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- QR Code Library - using qrcodejs which works better in browsers -->
+  <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
   
   <script>
     // Game state
@@ -923,30 +924,38 @@
       const joinUrl = window.location.origin + '?join=' + gameCode;
       
       // Generate QR code
-      const canvas = document.getElementById('qr-canvas');
+      const qrContainer = document.getElementById('qr-canvas');
       const fallback = document.getElementById('qr-fallback');
+      const fallbackUrl = document.getElementById('qr-fallback-url');
+      
+      // Set fallback URL
+      if (fallbackUrl) {
+        fallbackUrl.textContent = joinUrl;
+      }
+      
+      // Clear any previous QR code
+      qrContainer.innerHTML = '';
       
       if (typeof QRCode !== 'undefined') {
-        QRCode.toCanvas(canvas, joinUrl, {
-          width: 180,
-          margin: 2,
-          color: {
-            dark: '#2c1810',
-            light: '#f4e4bc'
-          }
-        }, function(error) {
-          if (error) {
-            console.error('QR Code error:', error);
-            canvas.classList.add('hidden');
-            fallback.classList.remove('hidden');
-          } else {
-            canvas.classList.remove('hidden');
-            fallback.classList.add('hidden');
-          }
-        });
+        try {
+          new QRCode(qrContainer, {
+            text: joinUrl,
+            width: 180,
+            height: 180,
+            colorDark: '#2c1810',
+            colorLight: '#f4e4bc',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+          qrContainer.classList.remove('hidden');
+          fallback.classList.add('hidden');
+        } catch (e) {
+          console.error('QR Code exception:', e);
+          qrContainer.classList.add('hidden');
+          fallback.classList.remove('hidden');
+        }
       } else {
         console.warn('QRCode library not loaded');
-        canvas.classList.add('hidden');
+        qrContainer.classList.add('hidden');
         fallback.classList.remove('hidden');
       }
     }
@@ -1104,11 +1113,30 @@
       }
     }
     
+    // Track team selection state globally so it persists across renders
+    let teamSelectionState = {
+      selected: new Set(),
+      questSize: 0
+    };
+    
     // Team selection phase
     function renderTeamSelection(container, state) {
       const questSize = state.questSizes[state.currentQuest];
       
+      // Reset selection if quest changed
+      if (teamSelectionState.questSize !== questSize) {
+        teamSelectionState.selected = new Set();
+        teamSelectionState.questSize = questSize;
+      }
+      
       if (state.isLeader) {
+        // Check if we already have the team selector rendered
+        const existingSelector = document.getElementById('team-selector');
+        if (existingSelector) {
+          // Don't re-render, just return to preserve selection
+          return;
+        }
+        
         container.innerHTML = `
           <div class="phase-header">
             <div class="phase-title">Select Your Team</div>
@@ -1116,15 +1144,15 @@
           </div>
           <div class="team-selector" id="team-selector">
             ${state.players.map(p => `
-              <div class="team-player" data-id="${p.id}">
+              <div class="team-player ${teamSelectionState.selected.has(p.id) ? 'selected' : ''}" data-id="${p.id}">
                 <span class="player-name">${escapeHtml(p.name)}</span>
                 ${p.id === playerId ? '<span class="player-badge you">You</span>' : ''}
                 <div class="checkbox">✓</div>
               </div>
             `).join('')}
           </div>
-          <button class="btn btn-primary" id="btn-propose" disabled>
-            Propose Team (0/${questSize})
+          <button class="btn btn-primary" id="btn-propose" ${teamSelectionState.selected.size !== questSize ? 'disabled' : ''}>
+            Propose Team (${teamSelectionState.selected.size}/${questSize})
           </button>
         `;
         
@@ -1146,22 +1174,21 @@
     function setupTeamSelector(questSize) {
       const selector = document.getElementById('team-selector');
       const proposeBtn = document.getElementById('btn-propose');
-      const selected = new Set();
       
       selector.querySelectorAll('.team-player').forEach(el => {
         el.addEventListener('click', () => {
           const id = el.dataset.id;
           
-          if (selected.has(id)) {
-            selected.delete(id);
+          if (teamSelectionState.selected.has(id)) {
+            teamSelectionState.selected.delete(id);
             el.classList.remove('selected');
-          } else if (selected.size < questSize) {
-            selected.add(id);
+          } else if (teamSelectionState.selected.size < questSize) {
+            teamSelectionState.selected.add(id);
             el.classList.add('selected');
           }
           
-          proposeBtn.disabled = selected.size !== questSize;
-          proposeBtn.textContent = `Propose Team (${selected.size}/${questSize})`;
+          proposeBtn.disabled = teamSelectionState.selected.size !== questSize;
+          proposeBtn.textContent = `Propose Team (${teamSelectionState.selected.size}/${questSize})`;
         });
       });
       
@@ -1170,8 +1197,10 @@
           await api('propose', { 
             code: gameCode, 
             playerId, 
-            team: Array.from(selected) 
+            team: Array.from(teamSelectionState.selected) 
           });
+          // Clear selection after successful proposal
+          teamSelectionState.selected = new Set();
         } catch (error) {
           alert(error.message);
         }
