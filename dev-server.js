@@ -67,6 +67,7 @@ const GAME_PHASES = {
   TEAM_SELECTION: 'team_selection',
   TEAM_VOTE: 'team_vote',
   QUEST: 'quest',
+  QUEST_RESULT: 'quest_result',
   ASSASSINATION: 'assassination',
   GAME_OVER: 'game_over'
 };
@@ -271,6 +272,12 @@ function getPublicGameState(game, playerId) {
       const isSaul = player.role === ROLES.SAUL;
       publicState.isSaul = isSaul;
       publicState.assassinationReady = game.assassinationTarget !== null;
+    }
+    
+    if (game.phase === GAME_PHASES.QUEST_RESULT) {
+      const lastResult = game.questResults[game.questResults.length - 1];
+      publicState.lastQuestResult = lastResult;
+      publicState.isHost = player.isHost;
     }
   }
   
@@ -631,32 +638,19 @@ async function handleApiRequest(path, body) {
     
     if (Object.keys(game.questVotes).length === game.proposedTeam.length) {
       const failCount = Object.values(game.questVotes).filter(v => !v).length;
+      const successCount = Object.values(game.questVotes).filter(v => v).length;
       const failsRequired = QUEST_FAIL_REQUIREMENTS[game.currentQuest];
       const questSuccess = failCount < failsRequired;
       
       game.questResults.push({
         success: questSuccess,
         failCount: failCount,
+        successCount: successCount,
         team: [...game.proposedTeam]
       });
       
-      const goodWins = game.questResults.filter(r => r.success).length;
-      const evilWins = game.questResults.filter(r => !r.success).length;
-      
-      if (goodWins >= 3) {
-        game.phase = GAME_PHASES.ASSASSINATION;
-      } else if (evilWins >= 3) {
-        game.phase = GAME_PHASES.GAME_OVER;
-        game.winner = 'evil';
-        game.winReason = 'Three quests failed';
-      } else {
-        game.currentQuest++;
-        game.leaderIndex = (game.leaderIndex + 1) % game.players.length;
-        game.proposedTeam = [];
-        game.votes = {};
-        game.questVotes = {};
-        game.phase = GAME_PHASES.TEAM_SELECTION;
-      }
+      // Go to quest result phase to show the outcome
+      game.phase = GAME_PHASES.QUEST_RESULT;
     }
     
     await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
@@ -672,6 +666,57 @@ async function handleApiRequest(path, body) {
         failCount: lastResult.failCount
       };
     }
+    
+    return { success: true };
+  }
+  
+  // Continue from quest result
+  if (path === '/api/continue') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    
+    if (game.phase !== GAME_PHASES.QUEST_RESULT) {
+      throw new Error('Not in quest result phase');
+    }
+    
+    const player = game.players.find(p => p.id === playerId);
+    if (!player || !player.isHost) {
+      throw new Error('Only the host can continue');
+    }
+    
+    // Determine next phase based on results
+    const goodWins = game.questResults.filter(r => r.success).length;
+    const evilWins = game.questResults.filter(r => !r.success).length;
+    
+    if (goodWins >= 3) {
+      game.phase = GAME_PHASES.ASSASSINATION;
+    } else if (evilWins >= 3) {
+      game.phase = GAME_PHASES.GAME_OVER;
+      game.winner = 'evil';
+      game.winReason = 'Three quests failed';
+    } else {
+      game.currentQuest++;
+      game.leaderIndex = (game.leaderIndex + 1) % game.players.length;
+      game.proposedTeam = [];
+      game.votes = {};
+      game.questVotes = {};
+      game.phase = GAME_PHASES.TEAM_SELECTION;
+    }
+    
+    game.updatedAt = Date.now();
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: parseInt(env.GAME_EXPIRY_SECONDS)
+    });
     
     return { success: true };
   }

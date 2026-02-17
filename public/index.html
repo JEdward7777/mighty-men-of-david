@@ -608,6 +608,128 @@
       background: rgba(139, 26, 26, 0.1);
     }
     
+    /* Quest Result Screen */
+    .quest-result-screen {
+      text-align: center;
+      padding: 30px 20px;
+      border-radius: 12px;
+      margin: 10px 0;
+    }
+    
+    .quest-result-screen.success {
+      background: linear-gradient(135deg, rgba(26, 77, 46, 0.2) 0%, rgba(26, 77, 46, 0.1) 100%);
+      border: 3px solid var(--good);
+    }
+    
+    .quest-result-screen.fail {
+      background: linear-gradient(135deg, rgba(139, 26, 26, 0.2) 0%, rgba(139, 26, 26, 0.1) 100%);
+      border: 3px solid var(--evil);
+    }
+    
+    .result-icon {
+      font-size: 4rem;
+      margin-bottom: 10px;
+    }
+    
+    .result-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    
+    .quest-result-screen.success .result-title {
+      color: var(--good);
+    }
+    
+    .quest-result-screen.fail .result-title {
+      color: var(--evil);
+    }
+    
+    .result-subtitle {
+      font-size: 1rem;
+      color: var(--ink);
+      opacity: 0.8;
+      margin-bottom: 20px;
+    }
+    
+    .result-votes {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      margin-bottom: 25px;
+    }
+    
+    .vote-count {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .vote-count .count {
+      font-family: 'Cinzel', serif;
+      font-size: 2.5rem;
+      font-weight: 700;
+    }
+    
+    .vote-count .label {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .success-count .count {
+      color: var(--good);
+    }
+    
+    .fail-count .count {
+      color: var(--evil);
+    }
+    
+    .result-score {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: var(--ink);
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    
+    .score-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .score-label {
+      font-family: 'Cinzel', serif;
+      font-size: 0.8rem;
+      color: var(--parchment);
+      opacity: 0.8;
+    }
+    
+    .score-value {
+      font-family: 'Cinzel', serif;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    
+    .score-item.good .score-value {
+      color: var(--good);
+    }
+    
+    .score-item.evil .score-value {
+      color: var(--evil);
+    }
+    
+    .score-divider {
+      font-family: 'Cinzel', serif;
+      font-size: 1.5rem;
+      color: var(--gold);
+    }
+    
     @media (max-width: 360px) {
       .container {
         padding: 12px;
@@ -628,6 +750,14 @@
       
       .quest-number {
         font-size: 1rem;
+      }
+      
+      .result-title {
+        font-size: 1.4rem;
+      }
+      
+      .result-icon {
+        font-size: 3rem;
       }
     }
   </style>
@@ -1107,6 +1237,9 @@
         case 'quest':
           renderQuest(container, state);
           break;
+        case 'quest_result':
+          renderQuestResult(container, state);
+          break;
         case 'assassination':
           renderAssassination(container, state);
           break;
@@ -1268,6 +1401,8 @@
     async function submitVote(approve) {
       try {
         await api('vote', { code: gameCode, playerId, approve });
+        // Immediately refresh state to show waiting screen
+        await pollGameState();
       } catch (error) {
         alert(error.message);
       }
@@ -1344,8 +1479,78 @@
     async function submitQuestVote(success) {
       try {
         await api('quest', { code: gameCode, playerId, success });
+        // Immediately refresh state to show waiting screen
+        await pollGameState();
       } catch (error) {
         alert(error.message);
+      }
+    }
+    
+    // Quest result phase - celebration or mourning!
+    function renderQuestResult(container, state) {
+      const result = state.lastQuestResult;
+      if (!result) return;
+      
+      const questNum = state.questResults.length;
+      const isSuccess = result.success;
+      
+      // Count current wins
+      const goodWins = state.questResults.filter(r => r.success).length;
+      const evilWins = state.questResults.filter(r => !r.success).length;
+      
+      let html = `
+        <div class="quest-result-screen ${isSuccess ? 'success' : 'fail'}">
+          <div class="result-icon">${isSuccess ? '⚔️' : '💀'}</div>
+          <div class="result-title">${isSuccess ? 'Quest Succeeded!' : 'Quest Failed!'}</div>
+          <div class="result-subtitle">Quest ${questNum} Complete</div>
+          
+          <div class="result-votes">
+            <div class="vote-count success-count">
+              <span class="count">${result.successCount}</span>
+              <span class="label">Success</span>
+            </div>
+            <div class="vote-count fail-count">
+              <span class="count">${result.failCount}</span>
+              <span class="label">Fail${result.failCount !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          
+          <div class="result-score">
+            <div class="score-item good">
+              <span class="score-label">Good</span>
+              <span class="score-value">${goodWins}</span>
+            </div>
+            <div class="score-divider">-</div>
+            <div class="score-item evil">
+              <span class="score-label">Evil</span>
+              <span class="score-value">${evilWins}</span>
+            </div>
+          </div>
+      `;
+      
+      if (state.isHost) {
+        html += `
+          <button class="btn btn-primary" id="btn-continue">Continue</button>
+        `;
+      } else {
+        html += `
+          <div class="message waiting">Waiting for host to continue...</div>
+        `;
+      }
+      
+      html += `</div>`;
+      
+      container.innerHTML = html;
+      
+      if (state.isHost) {
+        document.getElementById('btn-continue').addEventListener('click', async () => {
+          try {
+            await api('continue', { code: gameCode, playerId });
+            await pollGameState();
+          } catch (error) {
+            alert(error.message);
+          }
+        });
       }
     }
     
