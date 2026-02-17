@@ -1666,7 +1666,7 @@
       
       let html = `
         <div class="quest-result-screen ${isSuccess ? 'success' : 'fail'}">
-          <div class="result-icon">${isSuccess ? '⚔️' : '💀'}</div>
+          <div class="result-icon">${isSuccess ? '⚔️' : '🔥'}</div>
           <div class="result-title">${isSuccess ? 'Quest Succeeded!' : 'Quest Failed!'}</div>
           <div class="result-subtitle">Quest ${questNum} Complete</div>
           
@@ -1721,8 +1721,15 @@
     }
     
     // Assassination phase
+    // Track assassination selection state globally so it persists across renders
+    let assassinationState = {
+      selectedTarget: null
+    };
+    
     function renderAssassination(container, state) {
       if (state.isSaul) {
+        const hasSelection = assassinationState.selectedTarget !== null;
+        
         container.innerHTML = `
           <div class="phase-header">
             <div class="phase-title">Assassination</div>
@@ -1733,12 +1740,12 @@
           </div>
           <div id="assassination-targets">
             ${state.players.filter(p => p.id !== playerId).map(p => `
-              <div class="assassination-target" data-id="${p.id}">
+              <div class="assassination-target ${assassinationState.selectedTarget === p.id ? 'selected' : ''}" data-id="${p.id}">
                 <span class="player-name">${escapeHtml(p.name)}</span>
               </div>
             `).join('')}
           </div>
-          <button class="btn btn-evil" id="btn-assassinate" disabled>
+          <button class="btn btn-evil" id="btn-assassinate" ${hasSelection ? '' : 'disabled'}>
             Eliminate Target
           </button>
         `;
@@ -1761,7 +1768,6 @@
     function setupAssassination() {
       const targets = document.getElementById('assassination-targets');
       const assassinateBtn = document.getElementById('btn-assassinate');
-      let selectedTarget = null;
       
       targets.querySelectorAll('.assassination-target').forEach(el => {
         el.addEventListener('click', () => {
@@ -1769,13 +1775,13 @@
             t.classList.remove('selected');
           });
           el.classList.add('selected');
-          selectedTarget = el.dataset.id;
+          assassinationState.selectedTarget = el.dataset.id;
           assassinateBtn.disabled = false;
         });
       });
       
       assassinateBtn.addEventListener('click', async () => {
-        if (!selectedTarget) return;
+        if (!assassinationState.selectedTarget) return;
         
         if (!confirm('Are you sure you want to eliminate this person?')) return;
         
@@ -1783,8 +1789,10 @@
           await api('assassinate', { 
             code: gameCode, 
             playerId, 
-            targetId: selectedTarget 
+            targetId: assassinationState.selectedTarget 
           });
+          // Clear selection after successful assassination
+          assassinationState.selectedTarget = null;
         } catch (error) {
           alert(error.message);
         }
