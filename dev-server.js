@@ -66,6 +66,7 @@ const GAME_PHASES = {
   LOBBY: 'lobby',
   TEAM_SELECTION: 'team_selection',
   TEAM_VOTE: 'team_vote',
+  VOTE_RESULT: 'vote_result',
   QUEST: 'quest',
   QUEST_RESULT: 'quest_result',
   ASSASSINATION: 'assassination',
@@ -260,12 +261,23 @@ function getPublicGameState(game, playerId) {
     
     if (game.phase === GAME_PHASES.TEAM_VOTE) {
       publicState.votedPlayers = Object.keys(game.votes);
-      publicState.hasVoted = !!game.votes[playerId];
+      publicState.hasVoted = game.votes[playerId] !== undefined;
+    }
+    
+    if (game.phase === GAME_PHASES.VOTE_RESULT) {
+      publicState.lastVoteResult = game.lastVoteResult;
+      // Include player names with their votes
+      publicState.voteDetails = game.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        approved: game.lastVoteResult.votes[p.id]
+      }));
+      publicState.isHost = player.isHost;
     }
     
     if (game.phase === GAME_PHASES.QUEST) {
       publicState.questVotedPlayers = Object.keys(game.questVotes);
-      publicState.hasQuestVoted = !!game.questVotes[playerId];
+      publicState.hasQuestVoted = game.questVotes[playerId] !== undefined;
     }
     
     if (game.phase === GAME_PHASES.ASSASSINATION) {
@@ -563,40 +575,78 @@ async function handleApiRequest(path, body) {
     
     if (Object.keys(game.votes).length === game.players.length) {
       const approveCount = Object.values(game.votes).filter(v => v).length;
+      const rejectCount = game.players.length - approveCount;
       const approved = approveCount > game.players.length / 2;
       
-      if (approved) {
-        game.questVotes = {};
-        game.phase = GAME_PHASES.QUEST;
-        game.rejectCount = 0;
-      } else {
-        game.rejectCount++;
-        
-        if (game.rejectCount >= 5) {
-          game.phase = GAME_PHASES.GAME_OVER;
-          game.winner = 'evil';
-          game.winReason = 'Five consecutive team proposals were rejected';
-        } else {
-          game.leaderIndex = (game.leaderIndex + 1) % game.players.length;
-          game.proposedTeam = [];
-          game.votes = {};
-          game.phase = GAME_PHASES.TEAM_SELECTION;
-        }
-      }
+      // Store the vote result for display
+      game.lastVoteResult = {
+        approved: approved,
+        approveCount: approveCount,
+        rejectCount: rejectCount,
+        votes: { ...game.votes }, // Copy the votes so we can show who voted what
+        team: [...game.proposedTeam]
+      };
+      
+      // Go to vote result phase to show the outcome
+      game.phase = GAME_PHASES.VOTE_RESULT;
     }
     
     await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
       expirationTtl: parseInt(env.GAME_EXPIRY_SECONDS)
     });
     
-    if (Object.keys(game.votes).length === game.players.length) {
-      return {
-        success: true,
-        voteComplete: true,
-        votes: game.votes,
-        approved: Object.values(game.votes).filter(v => v).length > game.players.length / 2
-      };
+    return { success: true };
+  }
+  
+  // Continue from vote result phase
+  if (path === '/api/continue_vote') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
     }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    
+    if (game.phase !== GAME_PHASES.VOTE_RESULT) {
+      throw new Error('Not in vote result phase');
+    }
+    
+    const player = game.players.find(p => p.id === playerId);
+    if (!player || !player.isHost) {
+      throw new Error('Only the host can continue');
+    }
+    
+    const approved = game.lastVoteResult.approved;
+    
+    if (approved) {
+      game.questVotes = {};
+      game.phase = GAME_PHASES.QUEST;
+      game.rejectCount = 0;
+    } else {
+      game.rejectCount++;
+      
+      if (game.rejectCount >= 5) {
+        game.phase = GAME_PHASES.GAME_OVER;
+        game.winner = 'evil';
+        game.winReason = 'Five consecutive team proposals were rejected';
+      } else {
+        game.leaderIndex = (game.leaderIndex + 1) % game.players.length;
+        game.proposedTeam = [];
+        game.votes = {};
+        game.phase = GAME_PHASES.TEAM_SELECTION;
+      }
+    }
+    
+    game.updatedAt = Date.now();
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: parseInt(env.GAME_EXPIRY_SECONDS)
+    });
     
     return { success: true };
   }

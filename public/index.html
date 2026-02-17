@@ -608,6 +608,103 @@
       background: rgba(139, 26, 26, 0.1);
     }
     
+    /* Vote Result Screen */
+    .vote-result-screen {
+      text-align: center;
+      padding: 30px 20px;
+      border-radius: 12px;
+      margin: 10px 0;
+    }
+    
+    .vote-result-screen.approved {
+      background: linear-gradient(135deg, rgba(26, 77, 46, 0.2) 0%, rgba(26, 77, 46, 0.1) 100%);
+      border: 3px solid var(--good);
+    }
+    
+    .vote-result-screen.rejected {
+      background: linear-gradient(135deg, rgba(139, 26, 26, 0.2) 0%, rgba(139, 26, 26, 0.1) 100%);
+      border: 3px solid var(--evil);
+    }
+    
+    .vote-result-screen .result-icon {
+      font-size: 4rem;
+      margin-bottom: 10px;
+    }
+    
+    .vote-result-screen.approved .result-icon {
+      color: var(--good);
+    }
+    
+    .vote-result-screen.rejected .result-icon {
+      color: var(--evil);
+    }
+    
+    .vote-result-screen .result-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    
+    .vote-result-screen.approved .result-title {
+      color: var(--good);
+    }
+    
+    .vote-result-screen.rejected .result-title {
+      color: var(--evil);
+    }
+    
+    .vote-result-screen .result-subtitle {
+      font-size: 1.1rem;
+      color: var(--ink);
+      margin-bottom: 20px;
+    }
+    
+    .vote-details {
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .vote-details h3 {
+      font-family: 'Cinzel', serif;
+      margin-bottom: 10px;
+      color: var(--ink);
+    }
+    
+    .vote-list .player-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .vote-badge {
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    
+    .vote-badge.approve {
+      background: var(--good);
+      color: white;
+    }
+    
+    .vote-badge.reject {
+      background: var(--evil);
+      color: white;
+    }
+    
+    .reject-warning {
+      background: rgba(139, 26, 26, 0.1);
+      border: 1px solid var(--evil);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 20px;
+      color: var(--evil);
+    }
+    
     /* Quest Result Screen */
     .quest-result-screen {
       text-align: center;
@@ -1234,6 +1331,9 @@
         case 'team_vote':
           renderTeamVote(container, state);
           break;
+        case 'vote_result':
+          renderVoteResult(container, state);
+          break;
         case 'quest':
           renderQuest(container, state);
           break;
@@ -1405,6 +1505,67 @@
         await pollGameState();
       } catch (error) {
         alert(error.message);
+      }
+    }
+    
+    // Vote result phase - show how everyone voted
+    function renderVoteResult(container, state) {
+      const result = state.lastVoteResult;
+      if (!result) return;
+      
+      const isApproved = result.approved;
+      
+      let html = `
+        <div class="vote-result-screen ${isApproved ? 'approved' : 'rejected'}">
+          <div class="result-icon">${isApproved ? '✓' : '✗'}</div>
+          <div class="result-title">${isApproved ? 'Team Approved!' : 'Team Rejected!'}</div>
+          <div class="result-subtitle">${result.approveCount} Approve - ${result.rejectCount} Reject</div>
+          
+          <div class="vote-details">
+            <h3>How Everyone Voted</h3>
+            <ul class="player-list vote-list">
+              ${state.voteDetails.map(p => `
+                <li class="player-item">
+                  <span class="player-name">${escapeHtml(p.name)}</span>
+                  <span class="vote-badge ${p.approved ? 'approve' : 'reject'}">${p.approved ? 'Approve' : 'Reject'}</span>
+                </li>
+              `).join('')}
+            </ul>
+          </div>
+      `;
+      
+      if (!isApproved) {
+        html += `
+          <div class="reject-warning">
+            Rejections: ${state.rejectCount}/5
+            ${state.rejectCount >= 4 ? '<br><strong>⚠️ One more rejection and evil wins!</strong>' : ''}
+          </div>
+        `;
+      }
+      
+      if (state.isHost) {
+        html += `
+          <button class="btn btn-primary" id="btn-continue-vote">Continue</button>
+        `;
+      } else {
+        html += `
+          <div class="message waiting">Waiting for host to continue...</div>
+        `;
+      }
+      
+      html += `</div>`;
+      
+      container.innerHTML = html;
+      
+      if (state.isHost) {
+        document.getElementById('btn-continue-vote').addEventListener('click', async () => {
+          try {
+            await api('continue_vote', { code: gameCode, playerId });
+            await pollGameState();
+          } catch (error) {
+            alert(error.message);
+          }
+        });
       }
     }
     
