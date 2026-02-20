@@ -273,7 +273,10 @@ async function handleRequest(request, env) {
   
   // Serve static files
   if (path === '/' || path === '/index.html') {
-    return env.ASSETS.fetch(request);
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+    return new Response('Static files not available', { status: 503 });
   }
   
   // API routes
@@ -292,7 +295,10 @@ async function handleRequest(request, env) {
   }
   
   // Serve other static assets
-  return env.ASSETS.fetch(request);
+  if (env.ASSETS) {
+    return env.ASSETS.fetch(request);
+  }
+  return new Response('Static files not available', { status: 503 });
 }
 
 async function handleApiRequest(path, request, env) {

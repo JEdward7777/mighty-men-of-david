@@ -7,8 +7,14 @@ GAME_EXPIRY_SECONDS = "7200"  # 2 hours
 
 [[kv_namespaces]]
 binding = "GAMES"
-id = "placeholder_id"
-preview_id = "placeholder_preview_id"
+id = "cee84f043e2142f7bcb5876328d59899"
+preview_id = "cee84f043e2142f7bcb5876328d59899"
 
-[site]
-bucket = "./public"
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
