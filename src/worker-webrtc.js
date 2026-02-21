@@ -1,43 +1,42 @@
-// Mighty Men - CloudFlare Worker with WebRTC Signaling
-// This worker only handles WebRTC signaling via KV
-// Game state is managed by the host's browser via WebRTC data channels
+// Mighty Men - CloudFlare Worker (Signaling Only)
+// KV is used ONLY for:
+// 1. Game code registration (so players can find the game)
+// 2. WebRTC signaling (offer/answer/ICE exchange)
+// 3. Reconnection by name lookup
+// All game state lives in clients' browsers
 
-import {
-  GAME_PHASES,
-  createGame,
-  getPublicGameState,
-  getPlayerKnowledge,
-  GameActions
-} from './game-logic.js';
+const GAME_EXPIRY_SECONDS = 7200;  // 2 hours
 
-// ============ Constants ============
+function generateGameCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
 
-const SIGNAL_EXPIRY_SECONDS = 300; // 5 minutes for signaling data
-const GAME_EXPIRY_SECONDS = 7200;  // 2 hours for game metadata
-
-// ============ Request Handler ============
+function generatePlayerId() {
+  return 'p_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+}
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   
-  // CORS headers
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   };
   
-  // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
   
   // Serve static files
   if (path === '/' || path === '/index.html') {
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
-    }
+    if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('Static files not available', { status: 503 });
   }
   
@@ -48,7 +47,6 @@ async function handleRequest(request, env) {
       if (request.method === 'POST') {
         body = await request.json();
       }
-      
       const result = await handleApiRequest(path, body, env);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -62,17 +60,9 @@ async function handleRequest(request, env) {
   }
   
   // Serve other static assets
-  if (env.ASSETS) {
-    return env.ASSETS.fetch(request);
-  }
-  return new Response('Static files not available', { status: 503 });
+  if (env.ASSETS) return env.ASSETS.fetch(request);
+  return new Response('Not found', { status: 404 });
 }
-
-// ============ API Request Handler ============
-// In WebRTC mode, KV is only used for:
-// 1. Game creation (storing host info)
-// 2. WebRTC signaling (ICE exchange)
-// 3. Reconnection signaling
 
 async function handleApiRequest(path, body, env) {
   
@@ -81,287 +71,101 @@ async function handleApiRequest(path, body, env) {
     return { mode: 'webrtc' };
   }
   
-  // ============ Game Creation ============
-  // Host creates a game and registers in KV
+  // Create Game - Host registers a new game code
   if (path === '/api/create') {
     const { name } = body;
-    if (!name) {
-      throw new Error('Name is required');
-    }
+    if (!name) throw new Error('Name is required');
     
-    // Create game structure (host will maintain full state)
-    const game = createGame(name);
+    const gameCode = generateGameCode();
+    const hostId = generatePlayerId();
     
-    // Store full game state in KV (WebRTC mode still uses KV as backup)
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+    const gameInfo = {
+      code: gameCode,
+      hostId: hostId,
+      hostName: name,
+      createdAt: Date.now(),
+      players: [{ id: hostId, name: name, isHost: true }],
+      hostSignal: null,
+      pendingPlayers: {}
+    };
+    
+    await env.GAMES.put(`game:${gameCode}`, JSON.stringify(gameInfo), {
       expirationTtl: GAME_EXPIRY_SECONDS
     });
     
+    return { success: true, gameCode, playerId: hostId };
+  }
+  
+  // Check Game - Verify game exists
+  if (path === '/api/check') {
+    const { code } = body;
+    if (!code) throw new Error('Game code is required');
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      return { success: true, exists: false };
+    }
+    
+    const gameInfo = JSON.parse(gameData);
     return {
       success: true,
-      gameCode: game.code,
-      playerId: game.hostId
+      exists: true,
+      hasHost: !!gameInfo.hostSignal,
+      hostName: gameInfo.hostName
     };
   }
   
-  // ============ Join Game ============
-  if (path === '/api/join') {
+  // Rejoin by Name - Player reconnects using game code + name
+  if (path === '/api/rejoin-by-name') {
     const { code, name } = body;
-    if (!code || !name) {
-      throw new Error('Game code and name are required');
-    }
+    if (!code || !name) throw new Error('Game code and name are required');
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
+    if (!gameData) throw new Error('Game not found');
+    
+    const gameInfo = JSON.parse(gameData);
+    
+    const player = gameInfo.players.find(p => 
+      p.name.toLowerCase() === name.toLowerCase()
+    );
+    
+    if (!player) {
+      throw new Error('No player with that name found in this game');
     }
-    
-    const game = JSON.parse(gameData);
-    const result = GameActions.join(game, name);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
     
     return {
       success: true,
-      playerId: result.playerId,
-      gameCode: game.code
+      playerId: player.id,
+      isHost: player.isHost,
+      gameCode: gameInfo.code
     };
   }
   
-  // ============ Rejoin Game ============
-  if (path === '/api/rejoin') {
-    const { code, playerId } = body;
-    if (!code || !playerId) {
-      throw new Error('Game code and player ID are required');
+  // Register Player - Add player to game's lookup list
+  if (path === '/api/register-player') {
+    const { code, playerId, name } = body;
+    if (!code || !playerId || !name) {
+      throw new Error('Game code, player ID, and name are required');
     }
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
-    const game = JSON.parse(gameData);
-    const result = GameActions.rejoin(game, playerId);
+    const gameInfo = JSON.parse(gameData);
     
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return {
-      success: true,
-      playerName: result.playerName,
-      gameCode: game.code,
-      playerId: playerId
-    };
-  }
-  
-  // ============ Get Game State ============
-  if (path === '/api/state') {
-    const { code, playerId } = body;
-    if (!code) {
-      throw new Error('Game code is required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    const state = getPublicGameState(game, playerId);
-    
-    return { success: true, state };
-  }
-  
-  // ============ Get Player Knowledge ============
-  if (path === '/api/knowledge') {
-    const { code, playerId } = body;
-    if (!code || !playerId) {
-      throw new Error('Game code and player ID are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    const knowledge = getPlayerKnowledge(game, playerId);
-    
-    if (!knowledge) {
-      throw new Error('Player not found or game not started');
-    }
-    
-    return { success: true, knowledge };
-  }
-  
-  // ============ Start Game ============
-  if (path === '/api/start') {
-    const { code, playerId } = body;
-    if (!code || !playerId) {
-      throw new Error('Game code and player ID are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.start(game, playerId);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Propose Team ============
-  if (path === '/api/propose') {
-    const { code, playerId, team } = body;
-    if (!code || !playerId || !team) {
-      throw new Error('Game code, player ID, and team are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.propose(game, playerId, team);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Vote on Team ============
-  if (path === '/api/vote') {
-    const { code, playerId, approve } = body;
-    if (!code || !playerId || approve === undefined) {
-      throw new Error('Game code, player ID, and vote are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.vote(game, playerId, approve);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Continue from Vote Result ============
-  if (path === '/api/continue_vote') {
-    const { code, playerId } = body;
-    if (!code || !playerId) {
-      throw new Error('Game code and player ID are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.continueFromVote(game, playerId);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Quest Vote ============
-  if (path === '/api/quest') {
-    const { code, playerId, success } = body;
-    if (!code || !playerId || success === undefined) {
-      throw new Error('Game code, player ID, and quest vote are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    const result = GameActions.questVote(game, playerId, success);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    if (result.questComplete) {
-      return {
-        success: true,
-        questComplete: true,
-        questSuccess: result.questResult.success,
-        failCount: result.questResult.failCount
-      };
+    const existing = gameInfo.players.find(p => p.id === playerId);
+    if (!existing) {
+      gameInfo.players.push({ id: playerId, name: name, isHost: false });
+      
+      await env.GAMES.put(`game:${gameInfo.code}`, JSON.stringify(gameInfo), {
+        expirationTtl: GAME_EXPIRY_SECONDS
+      });
     }
     
     return { success: true };
   }
   
-  // ============ Continue from Quest Result ============
-  if (path === '/api/continue') {
-    const { code, playerId } = body;
-    if (!code || !playerId) {
-      throw new Error('Game code and player ID are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.continueFromQuest(game, playerId);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Assassination ============
-  if (path === '/api/assassinate') {
-    const { code, playerId, targetId } = body;
-    if (!code || !playerId || !targetId) {
-      throw new Error('Game code, player ID, and target are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const game = JSON.parse(gameData);
-    GameActions.assassinate(game, playerId, targetId);
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Host Signal Registration ============
-  // Host posts their WebRTC offer/ICE candidates
+  // Host Signal - Host posts WebRTC offer
   if (path === '/api/signal/host') {
     const { code, playerId, signal } = body;
     if (!code || !playerId || !signal) {
@@ -369,9 +173,7 @@ async function handleApiRequest(path, body, env) {
     }
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
     const gameInfo = JSON.parse(gameData);
     
@@ -379,10 +181,7 @@ async function handleApiRequest(path, body, env) {
       throw new Error('Only the host can post host signal');
     }
     
-    gameInfo.hostSignal = {
-      data: signal,
-      timestamp: Date.now()
-    };
+    gameInfo.hostSignal = { data: signal, timestamp: Date.now() };
     
     await env.GAMES.put(`game:${gameInfo.code}`, JSON.stringify(gameInfo), {
       expirationTtl: GAME_EXPIRY_SECONDS
@@ -391,18 +190,13 @@ async function handleApiRequest(path, body, env) {
     return { success: true };
   }
   
-  // ============ Get Host Signal ============
-  // Players retrieve host's signal to initiate connection
+  // Get Host Signal - Player retrieves host's offer
   if (path === '/api/signal/get-host') {
     const { code } = body;
-    if (!code) {
-      throw new Error('Game code is required');
-    }
+    if (!code) throw new Error('Game code is required');
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
     const gameInfo = JSON.parse(gameData);
     
@@ -413,27 +207,25 @@ async function handleApiRequest(path, body, env) {
     return {
       success: true,
       signal: gameInfo.hostSignal.data,
-      hostName: gameInfo.hostName
+      hostName: gameInfo.hostName,
+      hostId: gameInfo.hostId
     };
   }
   
-  // ============ Player Signal Registration ============
-  // Player posts their WebRTC answer/ICE candidates
+  // Player Signal - Player posts WebRTC answer
   if (path === '/api/signal/player') {
-    const { code, playerId, playerName, signal } = body;
-    if (!code || !playerId || !playerName || !signal) {
-      throw new Error('Game code, player ID, player name, and signal are required');
+    const { code, playerId, name, signal } = body;
+    if (!code || !playerId || !name || !signal) {
+      throw new Error('Game code, player ID, name, and signal are required');
     }
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
     const gameInfo = JSON.parse(gameData);
     
     gameInfo.pendingPlayers[playerId] = {
-      name: playerName,
+      name: name,
       signal: signal,
       timestamp: Date.now()
     };
@@ -445,8 +237,7 @@ async function handleApiRequest(path, body, env) {
     return { success: true };
   }
   
-  // ============ Get Pending Players ============
-  // Host polls for new player signals
+  // Get Pending Players - Host polls for new player signals
   if (path === '/api/signal/get-players') {
     const { code, playerId } = body;
     if (!code || !playerId) {
@@ -454,9 +245,7 @@ async function handleApiRequest(path, body, env) {
     }
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
     const gameInfo = JSON.parse(gameData);
     
@@ -464,28 +253,22 @@ async function handleApiRequest(path, body, env) {
       throw new Error('Only the host can get pending players');
     }
     
-    return {
-      success: true,
-      pendingPlayers: gameInfo.pendingPlayers
-    };
+    return { success: true, pendingPlayers: gameInfo.pendingPlayers || {} };
   }
   
-  // ============ Clear Pending Player ============
-  // Host clears a player after successful connection
+  // Clear Pending Player - Host removes player after connecting
   if (path === '/api/signal/clear-player') {
-    const { code, hostId, clearPlayerId } = body;
-    if (!code || !hostId || !clearPlayerId) {
-      throw new Error('Game code, host ID, and player ID to clear are required');
+    const { code, playerId, clearPlayerId } = body;
+    if (!code || !playerId || !clearPlayerId) {
+      throw new Error('Game code, player ID, and clear player ID are required');
     }
     
     const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
+    if (!gameData) throw new Error('Game not found');
     
     const gameInfo = JSON.parse(gameData);
     
-    if (gameInfo.hostId !== hostId) {
+    if (gameInfo.hostId !== playerId) {
       throw new Error('Only the host can clear pending players');
     }
     
@@ -498,89 +281,8 @@ async function handleApiRequest(path, body, env) {
     return { success: true };
   }
   
-  // ============ Check Game Exists ============
-  // Quick check if a game code is valid
-  if (path === '/api/check') {
-    const { code } = body;
-    if (!code) {
-      throw new Error('Game code is required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    
-    return {
-      success: true,
-      exists: !!gameData,
-      hasHost: gameData ? !!JSON.parse(gameData).hostSignal : false
-    };
-  }
-  
-  // ============ Reconnection Support ============
-  // Player requests reconnection (posts new signal)
-  if (path === '/api/signal/reconnect') {
-    const { code, playerId, playerName, signal } = body;
-    if (!code || !playerId || !signal) {
-      throw new Error('Game code, player ID, and signal are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const gameInfo = JSON.parse(gameData);
-    
-    // Add to pending players for reconnection
-    gameInfo.pendingPlayers[playerId] = {
-      name: playerName || 'Reconnecting...',
-      signal: signal,
-      timestamp: Date.now(),
-      isReconnect: true
-    };
-    
-    await env.GAMES.put(`game:${gameInfo.code}`, JSON.stringify(gameInfo), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-  
-  // ============ Host Reconnection ============
-  // Host posts new signal after reconnection
-  if (path === '/api/signal/host-reconnect') {
-    const { code, playerId, signal } = body;
-    if (!code || !playerId || !signal) {
-      throw new Error('Game code, player ID, and signal are required');
-    }
-    
-    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
-    if (!gameData) {
-      throw new Error('Game not found');
-    }
-    
-    const gameInfo = JSON.parse(gameData);
-    
-    if (gameInfo.hostId !== playerId) {
-      throw new Error('Only the host can post host signal');
-    }
-    
-    gameInfo.hostSignal = {
-      data: signal,
-      timestamp: Date.now(),
-      isReconnect: true
-    };
-    
-    await env.GAMES.put(`game:${gameInfo.code}`, JSON.stringify(gameInfo), {
-      expirationTtl: GAME_EXPIRY_SECONDS
-    });
-    
-    return { success: true };
-  }
-
   throw new Error('Unknown API endpoint');
 }
-
-// ============ Export ============
 
 export default {
   async fetch(request, env, ctx) {

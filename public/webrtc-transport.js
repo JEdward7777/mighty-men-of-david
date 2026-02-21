@@ -1,24 +1,22 @@
 // WebRTC Transport Layer for Mighty Men
-// This module handles WebRTC connections and game state synchronization
+// Full P2P communication - no polling, no server state
 
 class WebRTCTransport {
-  constructor(turnConfig = null) {
+  constructor() {
     this.isHost = false;
     this.gameCode = null;
     this.playerId = null;
     this.playerName = null;
-    this.hostConnection = null;  // For players: connection to host
-    this.playerConnections = {}; // For host: connections to players
-    this.gameState = null;
-    this.onStateUpdate = null;   // Callback when state changes
-    this.onConnectionChange = null; // Callback for connection status
-    this.onReconnecting = null;  // Callback for reconnection status
-    this.pollingInterval = null;
-    this.heartbeatInterval = null;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
     
-    // ICE servers configuration (STUN + optional TURN)
+    // Game state (host maintains authoritative copy, all have backup)
+    this.gameState = null;
+    this.stateTimestamp = null;
+    
+    // WebRTC connections
+    this.connections = new Map(); // playerId -> { pc, dataChannel, name, connected }
+    this.hostConnection = null;   // For non-host players
+    
+    // ICE servers (STUN for NAT traversal)
     this.iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -26,15 +24,16 @@ class WebRTCTransport {
       ]
     };
     
-    // Add TURN servers if provided
-    // turnConfig should be: { urls: 'turn:server:port', username: '...', credential: '...' }
-    if (turnConfig) {
-      if (Array.isArray(turnConfig)) {
-        this.iceServers.iceServers.push(...turnConfig);
-      } else {
-        this.iceServers.iceServers.push(turnConfig);
-      }
-    }
+    // Callbacks
+    this.onStateUpdate = null;      // Called when game state changes
+    this.onConnectionChange = null; // Called when player connects/disconnects
+    this.onError = null;            // Called on errors
+    
+    // Signaling polling (only during connection setup)
+    this.signalingInterval = null;
+    
+    // Connection status tracking
+    this.disconnectedPlayers = new Set();
   }
   
   // ============ Host Functions ============
@@ -43,7 +42,7 @@ class WebRTCTransport {
     this.isHost = true;
     this.playerName = hostName;
     
-    // Create game on server (get game code and player ID)
+    // Register game with server
     const response = await fetch('/api/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,57 +55,23 @@ class WebRTCTransport {
     this.gameCode = result.gameCode;
     this.playerId = result.playerId;
     
-    // Create local game state (host manages state locally)
+    // Initialize game state locally
     this.gameState = GameLogic.createGame(hostName);
     this.gameState.code = this.gameCode;
     this.gameState.hostId = this.playerId;
     this.gameState.players[0].id = this.playerId;
+    this.stateTimestamp = Date.now();
     
-    // Start listening for new players
-    await this.hostStartSignaling();
+    // Start listening for players
+    this.startHostSignaling();
     
-    return {
-      gameCode: this.gameCode,
-      playerId: this.playerId
-    };
+    return { gameCode: this.gameCode, playerId: this.playerId };
   }
   
-  async hostStartSignaling() {
-    // Create offer for players to connect
-    await this.updateHostSignal();
-    
-    // Poll for new players every 10 seconds
-    this.pollingInterval = setInterval(async () => {
-      await this.hostPollForPlayers();
-    }, 10000);
-    
-    // Heartbeat: broadcast state to all players every second
-    this.heartbeatInterval = setInterval(() => {
-      this.hostBroadcastState();
-    }, 1000);
-    
-    // Also poll immediately
-    await this.hostPollForPlayers();
-  }
-  
-  async updateHostSignal() {
-    // Create a new peer connection for signaling
-    // In practice, we'll create individual connections per player
-    // For now, just mark that host is available
-    const signal = {
-      type: 'host-available',
-      timestamp: Date.now()
-    };
-    
-    await fetch('/api/signal/host', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code: this.gameCode,
-        playerId: this.playerId,
-        signal: signal
-      })
-    });
+  startHostSignaling() {
+    // Poll for new player signals every 2 seconds
+    this.signalingInterval = setInterval(() => this.hostPollForPlayers(), 2000);
+    this.hostPollForPlayers(); // Check immediately
   }
   
   async hostPollForPlayers() {
@@ -114,22 +79,16 @@ class WebRTCTransport {
       const response = await fetch('/api/signal/get-players', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: this.gameCode,
-          playerId: this.playerId
-        })
+        body: JSON.stringify({ code: this.gameCode, playerId: this.playerId })
       });
       
       const result = await response.json();
-      if (result.error) {
-        console.error('Error polling for players:', result.error);
-        return;
-      }
+      if (result.error) return;
       
       // Process each pending player
-      for (const [pendingPlayerId, playerInfo] of Object.entries(result.pendingPlayers || {})) {
-        if (!this.playerConnections[pendingPlayerId]) {
-          await this.hostConnectToPlayer(pendingPlayerId, playerInfo);
+      for (const [pendingPlayerId, playerData] of Object.entries(result.pendingPlayers || {})) {
+        if (!this.connections.has(pendingPlayerId)) {
+          await this.hostConnectToPlayer(pendingPlayerId, playerData);
         }
       }
     } catch (error) {
@@ -137,249 +96,203 @@ class WebRTCTransport {
     }
   }
   
-  async hostConnectToPlayer(pendingPlayerId, playerInfo) {
-    console.log(`Host connecting to player: ${playerInfo.name}`);
+  async hostConnectToPlayer(playerId, playerData) {
+    console.log(`Host connecting to player: ${playerData.name}`);
     
     const pc = new RTCPeerConnection(this.iceServers);
-    const dataChannel = pc.createDataChannel('gameData');
+    const connection = { pc, dataChannel: null, name: playerData.name, connected: false };
+    this.connections.set(playerId, connection);
     
-    this.playerConnections[pendingPlayerId] = {
-      pc: pc,
-      dataChannel: dataChannel,
-      name: playerInfo.name,
-      connected: false
-    };
+    // Create data channel
+    const dataChannel = pc.createDataChannel('game');
+    connection.dataChannel = dataChannel;
     
-    // Set up data channel handlers
     dataChannel.onopen = () => {
-      console.log(`Data channel open with ${playerInfo.name}`);
-      this.playerConnections[pendingPlayerId].connected = true;
+      console.log(`Connected to player: ${playerData.name}`);
+      connection.connected = true;
+      this.disconnectedPlayers.delete(playerId);
       
-      // If this is a new player (not reconnect), add to game state
-      if (!playerInfo.isReconnect) {
-        // Add player to local game state
-        if (!this.gameState.players.some(p => p.id === pendingPlayerId)) {
-          this.gameState.players.push({
-            id: pendingPlayerId,
-            name: playerInfo.name,
-            role: null,
-            isHost: false,
-            connected: true,
-            lastSeen: Date.now()
-          });
-          this.gameState.updatedAt = Date.now();
-        }
-      } else {
-        // Mark player as reconnected
-        const player = this.gameState.players.find(p => p.id === pendingPlayerId);
-        if (player) {
-          player.connected = true;
-          player.lastSeen = Date.now();
-        }
+      // Add player to game state
+      const joinResult = GameLogic.GameActions.join(this.gameState, playerData.name);
+      // Update player ID to match
+      const newPlayer = this.gameState.players.find(p => p.id === joinResult.playerId);
+      if (newPlayer) {
+        newPlayer.id = playerId;
       }
+      this.stateTimestamp = Date.now();
       
-      // Send current game state to the new player
-      this.hostSendStateToPlayer(pendingPlayerId);
+      // Register player in KV for reconnection
+      this.registerPlayerInKV(playerId, playerData.name);
       
-      // Broadcast updated state to all players
-      this.hostBroadcastState();
+      // Send current state to new player
+      this.sendToPlayer(playerId, {
+        type: 'state',
+        state: this.gameState,
+        timestamp: this.stateTimestamp,
+        yourPlayerId: playerId
+      });
+      
+      // Notify all other players
+      this.broadcastState();
       
       if (this.onConnectionChange) {
-        this.onConnectionChange({ type: 'player-connected', playerId: pendingPlayerId, name: playerInfo.name });
+        this.onConnectionChange({ type: 'player-connected', playerId, name: playerData.name });
       }
     };
     
     dataChannel.onclose = () => {
-      console.log(`Data channel closed with ${playerInfo.name}`);
-      this.playerConnections[pendingPlayerId].connected = false;
-      
-      const player = this.gameState.players.find(p => p.id === pendingPlayerId);
-      if (player) {
-        player.connected = false;
-      }
+      console.log(`Player disconnected: ${playerData.name}`);
+      connection.connected = false;
+      this.disconnectedPlayers.add(playerId);
       
       if (this.onConnectionChange) {
-        this.onConnectionChange({ type: 'player-disconnected', playerId: pendingPlayerId, name: playerInfo.name });
+        this.onConnectionChange({ type: 'player-disconnected', playerId, name: playerData.name });
       }
     };
     
     dataChannel.onmessage = (event) => {
-      this.hostHandleMessage(pendingPlayerId, JSON.parse(event.data));
+      this.hostHandleMessage(playerId, JSON.parse(event.data));
     };
     
-    // Handle ICE candidates
-    const iceCandidates = [];
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        iceCandidates.push(event.candidate);
+    // ICE candidate handling
+    pc.onicecandidate = async (event) => {
+      if (event.candidate === null) {
+        // All candidates gathered, post our answer
+        await fetch('/api/signal/host', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: this.gameCode,
+            playerId: this.playerId,
+            signal: { type: 'answer', sdp: pc.localDescription, forPlayer: playerId }
+          })
+        });
       }
     };
     
-    // Create offer
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    // Set remote description (player's offer)
+    await pc.setRemoteDescription(new RTCSessionDescription(playerData.signal));
     
-    // Wait for ICE gathering to complete
-    await new Promise((resolve) => {
-      if (pc.iceGatheringState === 'complete') {
-        resolve();
-      } else {
-        pc.onicegatheringstatechange = () => {
-          if (pc.iceGatheringState === 'complete') {
-            resolve();
-          }
-        };
-        // Timeout after 5 seconds
-        setTimeout(resolve, 5000);
-      }
-    });
+    // Create and set answer
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
     
-    // Set remote description from player's answer
-    const playerSignal = playerInfo.signal;
-    if (playerSignal.answer) {
-      await pc.setRemoteDescription(new RTCSessionDescription(playerSignal.answer));
-      
-      // Add player's ICE candidates
-      for (const candidate of (playerSignal.iceCandidates || [])) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-    }
-    
-    // Clear the pending player from KV
+    // Clear this player from pending
     await fetch('/api/signal/clear-player', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: this.gameCode,
-        hostId: this.playerId,
-        clearPlayerId: pendingPlayerId
+        playerId: this.playerId,
+        clearPlayerId: playerId
       })
     });
   }
   
+  async registerPlayerInKV(playerId, name) {
+    try {
+      await fetch('/api/register-player', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: this.gameCode, playerId, name })
+      });
+    } catch (error) {
+      console.error('Failed to register player:', error);
+    }
+  }
+  
   hostHandleMessage(fromPlayerId, message) {
-    console.log(`Host received message from ${fromPlayerId}:`, message.type);
+    console.log(`Message from ${fromPlayerId}:`, message.type);
     
     switch (message.type) {
       case 'action':
         this.hostHandleAction(fromPlayerId, message.action, message.data);
         break;
-      case 'state-request':
-        this.hostSendStateToPlayer(fromPlayerId);
+      case 'request-state':
+        this.sendToPlayer(fromPlayerId, {
+          type: 'state',
+          state: this.gameState,
+          timestamp: this.stateTimestamp,
+          yourPlayerId: fromPlayerId
+        });
         break;
       case 'state-recovery':
-        // Player is sending their state for recovery
-        this.hostHandleStateRecovery(message.state);
+        // Player sending their state for host recovery
+        if (message.timestamp < this.stateTimestamp || !this.gameState) {
+          this.gameState = message.state;
+          this.stateTimestamp = message.timestamp;
+          console.log('Recovered state from player');
+        }
         break;
     }
   }
   
   hostHandleAction(fromPlayerId, action, data) {
     try {
-      let result;
-      
       switch (action) {
-        case 'join':
-          // Already handled during connection
-          result = { success: true };
-          break;
         case 'start':
-          result = GameActions.start(this.gameState, fromPlayerId);
+          GameLogic.GameActions.start(this.gameState, fromPlayerId);
           break;
         case 'propose':
-          result = GameActions.propose(this.gameState, fromPlayerId, data.team);
+          GameLogic.GameActions.propose(this.gameState, fromPlayerId, data.team);
           break;
         case 'vote':
-          result = GameActions.vote(this.gameState, fromPlayerId, data.approve);
+          GameLogic.GameActions.vote(this.gameState, fromPlayerId, data.approve);
           break;
         case 'continueFromVote':
-          result = GameActions.continueFromVote(this.gameState, fromPlayerId);
+          GameLogic.GameActions.continueFromVote(this.gameState, fromPlayerId);
           break;
         case 'questVote':
-          result = GameActions.questVote(this.gameState, fromPlayerId, data.success);
+          GameLogic.GameActions.questVote(this.gameState, fromPlayerId, data.success);
           break;
         case 'continueFromQuest':
-          result = GameActions.continueFromQuest(this.gameState, fromPlayerId);
+          GameLogic.GameActions.continueFromQuest(this.gameState, fromPlayerId);
           break;
         case 'assassinate':
-          result = GameActions.assassinate(this.gameState, fromPlayerId, data.targetId);
+          GameLogic.GameActions.assassinate(this.gameState, fromPlayerId, data.targetId);
           break;
-        default:
-          throw new Error('Unknown action');
       }
       
-      // Send result back to player
-      this.hostSendToPlayer(fromPlayerId, {
-        type: 'action-result',
-        action: action,
-        result: result
-      });
+      this.stateTimestamp = Date.now();
+      this.broadcastState();
       
-      // Broadcast updated state to all players
-      this.hostBroadcastState();
-      
-      // Update local UI
       if (this.onStateUpdate) {
         this.onStateUpdate(this.gameState);
       }
-      
     } catch (error) {
-      // Send error back to player
-      this.hostSendToPlayer(fromPlayerId, {
-        type: 'action-error',
-        action: action,
-        error: error.message
-      });
+      console.error('Action error:', error);
+      this.sendToPlayer(fromPlayerId, { type: 'error', message: error.message });
     }
   }
   
-  hostHandleStateRecovery(receivedState) {
-    // Only accept state if it has an older creation timestamp (same lineage)
-    if (receivedState && receivedState.createdAt) {
-      if (!this.gameState || receivedState.createdAt < this.gameState.createdAt) {
-        console.log('Recovering state from player - older timestamp');
-        this.gameState = receivedState;
-        this.hostBroadcastState();
-        if (this.onStateUpdate) {
-          this.onStateUpdate(this.gameState);
-        }
+  broadcastState() {
+    const message = {
+      type: 'state',
+      state: this.gameState,
+      timestamp: this.stateTimestamp
+    };
+    
+    for (const [playerId, conn] of this.connections) {
+      if (conn.connected && conn.dataChannel?.readyState === 'open') {
+        conn.dataChannel.send(JSON.stringify({ ...message, yourPlayerId: playerId }));
       }
     }
   }
   
-  hostSendStateToPlayer(playerId) {
-    const conn = this.playerConnections[playerId];
-    if (conn && conn.connected && conn.dataChannel.readyState === 'open') {
-      conn.dataChannel.send(JSON.stringify({
-        type: 'state-update',
-        state: this.gameState
-      }));
-    }
-  }
-  
-  hostSendToPlayer(playerId, message) {
-    const conn = this.playerConnections[playerId];
-    if (conn && conn.connected && conn.dataChannel.readyState === 'open') {
+  sendToPlayer(playerId, message) {
+    const conn = this.connections.get(playerId);
+    if (conn?.connected && conn.dataChannel?.readyState === 'open') {
       conn.dataChannel.send(JSON.stringify(message));
     }
   }
   
-  hostBroadcastState() {
-    const message = JSON.stringify({
-      type: 'state-update',
-      state: this.gameState
-    });
-    
-    for (const [playerId, conn] of Object.entries(this.playerConnections)) {
-      if (conn.connected && conn.dataChannel.readyState === 'open') {
-        conn.dataChannel.send(message);
-      }
+  // Host performs action on their own game
+  doAction(action, data = {}) {
+    if (this.isHost) {
+      this.hostHandleAction(this.playerId, action, data);
+    } else {
+      this.sendToHost({ type: 'action', action, data });
     }
-  }
-  
-  // Host performs an action on their own game state
-  hostDoAction(action, data) {
-    this.hostHandleAction(this.playerId, action, data);
   }
   
   // ============ Player Functions ============
@@ -388,37 +301,66 @@ class WebRTCTransport {
     this.isHost = false;
     this.gameCode = gameCode.toUpperCase();
     this.playerName = playerName;
+    this.playerId = 'p_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     
-    // Join game via HTTP first (gets server-assigned player ID and validates game exists)
-    const joinResponse = await fetch('/api/join', {
+    // Check game exists
+    const checkResponse = await fetch('/api/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: this.gameCode })
+    });
+    
+    const checkResult = await checkResponse.json();
+    if (!checkResult.exists) throw new Error('Game not found');
+    
+    // Connect to host
+    await this.playerConnectToHost();
+    
+    return { gameCode: this.gameCode, playerId: this.playerId };
+  }
+  
+  async rejoinGame(gameCode, playerName) {
+    this.gameCode = gameCode.toUpperCase();
+    this.playerName = playerName;
+    
+    // Look up player ID by name
+    const response = await fetch('/api/rejoin-by-name', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: this.gameCode, name: playerName })
     });
     
-    const joinResult = await joinResponse.json();
-    if (joinResult.error) {
-      throw new Error(joinResult.error);
+    const result = await response.json();
+    if (result.error) throw new Error(result.error);
+    
+    this.playerId = result.playerId;
+    this.isHost = result.isHost;
+    
+    if (this.isHost) {
+      // Rejoining as host - need to recover state from players
+      await this.hostRejoin();
+    } else {
+      // Rejoining as player - connect to host
+      await this.playerConnectToHost();
     }
     
-    this.playerId = joinResult.playerId;
-    this.gameCode = joinResult.gameCode;
+    return { gameCode: this.gameCode, playerId: this.playerId, isHost: this.isHost };
+  }
+  
+  async hostRejoin() {
+    // Host lost state, need to get it from players
+    this.isHost = true;
+    this.startHostSignaling();
     
-    // Now we're registered with the server - state updates will come via polling
-    // (In full WebRTC mode, we'd connect to host via WebRTC here)
-    // For now, the server handles state so we just return
-    
-    return {
-      gameCode: this.gameCode,
-      playerId: this.playerId
-    };
+    // Wait for players to reconnect and send state
+    // The first player to connect will send their state
   }
   
   async playerConnectToHost() {
     const pc = new RTCPeerConnection(this.iceServers);
-    this.hostConnection = { pc: pc, dataChannel: null, connected: false };
+    this.hostConnection = { pc, dataChannel: null, connected: false };
     
-    // Handle incoming data channel from host
+    // Handle data channel from host
     pc.ondatachannel = (event) => {
       const dataChannel = event.channel;
       this.hostConnection.dataChannel = dataChannel;
@@ -426,12 +368,6 @@ class WebRTCTransport {
       dataChannel.onopen = () => {
         console.log('Connected to host!');
         this.hostConnection.connected = true;
-        this.reconnectAttempts = 0;
-        
-        // Clear reconnecting status
-        if (this.onReconnecting) {
-          this.onReconnecting({ status: 'connected' });
-        }
         
         if (this.onConnectionChange) {
           this.onConnectionChange({ type: 'connected-to-host' });
@@ -446,7 +382,7 @@ class WebRTCTransport {
           this.onConnectionChange({ type: 'disconnected-from-host' });
         }
         
-        // Attempt reconnection
+        // Try to reconnect
         this.playerAttemptReconnect();
       };
       
@@ -455,17 +391,9 @@ class WebRTCTransport {
       };
     };
     
-    // Collect ICE candidates
-    const iceCandidates = [];
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        iceCandidates.push(event.candidate);
-      }
-    };
-    
-    // Get host's offer (for initial connection, host creates offer)
-    // But in our signaling model, player creates answer to host's presence
-    // Actually, let's use a simpler model: player posts their info, host initiates
+    // Create offer
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
     
     // Wait for ICE gathering
     await new Promise((resolve) => {
@@ -473,184 +401,144 @@ class WebRTCTransport {
         resolve();
       } else {
         pc.onicegatheringstatechange = () => {
-          if (pc.iceGatheringState === 'complete') {
-            resolve();
-          }
+          if (pc.iceGatheringState === 'complete') resolve();
         };
-        setTimeout(resolve, 5000);
       }
     });
     
-    // Post our signal to KV for host to pick up
+    // Post our offer to server
     await fetch('/api/signal/player', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: this.gameCode,
         playerId: this.playerId,
-        playerName: this.playerName,
-        signal: {
-          // Player is ready to receive offer from host
-          ready: true,
-          timestamp: Date.now()
-        }
+        name: this.playerName,
+        signal: pc.localDescription
       })
     });
     
-    // Wait for connection (host will connect to us)
-    // This is handled by the ondatachannel event
+    // Poll for host's answer
+    await this.waitForHostAnswer(pc);
   }
   
-  async playerAttemptReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnect attempts reached');
-      if (this.onReconnecting) {
-        this.onReconnecting({ status: 'failed', attempts: this.reconnectAttempts });
-      }
-      if (this.onConnectionChange) {
-        this.onConnectionChange({ type: 'reconnect-failed' });
-      }
-      return;
-    }
+  async waitForHostAnswer(pc) {
+    const maxAttempts = 30;
+    let attempts = 0;
     
-    this.reconnectAttempts++;
-    console.log(`Attempting reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    
-    // Notify UI that we're reconnecting
-    if (this.onReconnecting) {
-      this.onReconnecting({ 
-        status: 'reconnecting', 
-        attempts: this.reconnectAttempts,
-        maxAttempts: this.maxReconnectAttempts
-      });
-    }
-    
-    // Wait a bit before reconnecting
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    try {
-      await fetch('/api/signal/reconnect', {
+    while (attempts < maxAttempts) {
+      const response = await fetch('/api/signal/get-host', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: this.gameCode,
-          playerId: this.playerId,
-          playerName: this.playerName,
-          signal: {
-            ready: true,
-            timestamp: Date.now()
-          }
-        })
+        body: JSON.stringify({ code: this.gameCode })
       });
-    } catch (error) {
-      console.error('Reconnect signal failed:', error);
+      
+      const result = await response.json();
+      
+      if (result.signal?.type === 'answer' && result.signal.forPlayer === this.playerId) {
+        await pc.setRemoteDescription(new RTCSessionDescription(result.signal.sdp));
+        return;
+      }
+      
+      await new Promise(r => setTimeout(r, 1000));
+      attempts++;
     }
+    
+    throw new Error('Timeout waiting for host connection');
   }
   
   playerHandleMessage(message) {
-    console.log('Player received message:', message.type);
-    
     switch (message.type) {
-      case 'state-update':
-        // Only update if state is older (same lineage) or we don't have state
-        if (!this.gameState || message.state.createdAt <= this.gameState.createdAt) {
-          this.gameState = message.state;
-          if (this.onStateUpdate) {
-            this.onStateUpdate(this.gameState);
-          }
+      case 'state':
+        this.gameState = message.state;
+        this.stateTimestamp = message.timestamp;
+        if (message.yourPlayerId) {
+          this.playerId = message.yourPlayerId;
+        }
+        if (this.onStateUpdate) {
+          this.onStateUpdate(this.gameState);
         }
         break;
-      case 'action-result':
-        // Action completed successfully
-        console.log('Action result:', message.action, message.result);
-        break;
-      case 'action-error':
-        // Action failed
-        console.error('Action error:', message.action, message.error);
-        alert(message.error);
+      case 'error':
+        if (this.onError) {
+          this.onError(message.message);
+        }
         break;
     }
   }
   
-  // Player sends an action to host
-  playerDoAction(action, data = {}) {
-    if (!this.hostConnection || !this.hostConnection.connected) {
-      throw new Error('Not connected to host');
+  sendToHost(message) {
+    if (this.hostConnection?.connected && this.hostConnection.dataChannel?.readyState === 'open') {
+      this.hostConnection.dataChannel.send(JSON.stringify(message));
+    }
+  }
+  
+  async playerAttemptReconnect() {
+    console.log('Attempting to reconnect to host...');
+    
+    if (this.onConnectionChange) {
+      this.onConnectionChange({ type: 'reconnecting' });
     }
     
-    this.hostConnection.dataChannel.send(JSON.stringify({
-      type: 'action',
-      action: action,
-      data: data
-    }));
-  }
-  
-  // Player sends their state to host (for recovery)
-  playerSendStateForRecovery() {
-    if (this.hostConnection && this.hostConnection.connected && this.gameState) {
-      this.hostConnection.dataChannel.send(JSON.stringify({
-        type: 'state-recovery',
-        state: this.gameState
-      }));
+    // Wait a bit then try again
+    await new Promise(r => setTimeout(r, 2000));
+    
+    try {
+      await this.playerConnectToHost();
+    } catch (error) {
+      console.error('Reconnection failed:', error);
+      // Try again
+      setTimeout(() => this.playerAttemptReconnect(), 5000);
     }
   }
   
-  // ============ Common Functions ============
+  // ============ State Access ============
   
   getPublicState() {
     if (!this.gameState) return null;
-    return getPublicGameState(this.gameState, this.playerId);
+    return GameLogic.getPublicGameState(this.gameState, this.playerId);
   }
   
   getKnowledge() {
     if (!this.gameState) return null;
-    return getPlayerKnowledge(this.gameState, this.playerId);
+    return GameLogic.getPlayerKnowledge(this.gameState, this.playerId);
   }
   
-  // Perform an action (routes to host or player method)
-  doAction(action, data = {}) {
-    if (this.isHost) {
-      this.hostDoAction(action, data);
-    } else {
-      this.playerDoAction(action, data);
-    }
+  // ============ Connection Status ============
+  
+  getDisconnectedPlayers() {
+    if (!this.isHost) return [];
+    return Array.from(this.disconnectedPlayers).map(id => {
+      const conn = this.connections.get(id);
+      return { id, name: conn?.name || 'Unknown' };
+    });
   }
   
-  // Clean up connections
-  disconnect() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+  isEveryoneConnected() {
+    if (!this.isHost) {
+      return this.hostConnection?.connected || false;
+    }
+    return this.disconnectedPlayers.size === 0;
+  }
+  
+  // ============ Cleanup ============
+  
+  destroy() {
+    if (this.signalingInterval) {
+      clearInterval(this.signalingInterval);
     }
     
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
+    for (const conn of this.connections.values()) {
+      conn.dataChannel?.close();
+      conn.pc?.close();
     }
     
-    if (this.hostConnection && this.hostConnection.pc) {
-      this.hostConnection.pc.close();
-    }
-    
-    for (const conn of Object.values(this.playerConnections)) {
-      if (conn.pc) {
-        conn.pc.close();
-      }
+    if (this.hostConnection) {
+      this.hostConnection.dataChannel?.close();
+      this.hostConnection.pc?.close();
     }
   }
 }
 
-// Import game logic for host-side actions
-// This will be available when the script is loaded after game-logic.js
-let GameActions, getPublicGameState, getPlayerKnowledge;
-
-// Initialize when game-logic is available
-function initWebRTCTransport(gameLogic) {
-  GameActions = gameLogic.GameActions;
-  getPublicGameState = gameLogic.getPublicGameState;
-  getPlayerKnowledge = gameLogic.getPlayerKnowledge;
-}
-
-// Export for use in main app
+// Make available globally
 window.WebRTCTransport = WebRTCTransport;
-window.initWebRTCTransport = initWebRTCTransport;

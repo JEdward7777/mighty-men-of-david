@@ -857,6 +857,42 @@
         font-size: 3rem;
       }
     }
+    
+    /* Disconnection notices */
+    #disconnection-notices {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .disconnection-notice {
+      background: rgba(139, 69, 19, 0.9);
+      color: #f4e4bc;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      animation: pulse 2s infinite;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    
+    .disconnection-notice.host-disconnect {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(139, 69, 19, 0.95);
+      font-size: 1.1rem;
+      padding: 20px 30px;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
   </style>
 </head>
 <body>
@@ -992,7 +1028,7 @@
     let playerId = null;
     let gameCode = null;
     let playerKnowledge = null;
-    let pollInterval = null;
+
     let isHoldingRole = false;
     let lastVotes = null;
     
@@ -1016,120 +1052,115 @@
       sheep: 'You know your evil allies (except Doeg)'
     };
     
-    // Server mode detection
-    let serverMode = 'kv'; // 'kv' or 'webrtc'
+    // WebRTC Transport
     let webrtcTransport = null;
     
-    // Reconnection UI
-    function showReconnectBanner(message) {
-      const banner = document.getElementById('reconnect-banner');
-      const msgEl = document.getElementById('reconnect-message');
-      msgEl.textContent = message;
-      banner.classList.remove('hidden');
-    }
+    // Disconnection notices (non-blocking)
+    let disconnectionNotices = new Map(); // playerId -> noticeElement
     
-    function hideReconnectBanner() {
-      const banner = document.getElementById('reconnect-banner');
-      banner.classList.add('hidden');
-    }
-    
-    function handleReconnectionStatus(status) {
-      if (status.status === 'reconnecting') {
-        showReconnectBanner(`Reconnecting... (${status.attempts}/${status.maxAttempts})`);
-      } else if (status.status === 'connected') {
-        hideReconnectBanner();
-      } else if (status.status === 'failed') {
-        showReconnectBanner('Connection lost. Please refresh the page.');
+    function showDisconnectionNotice(playerId, playerName) {
+      if (disconnectionNotices.has(playerId)) return;
+      
+      const notice = document.createElement('div');
+      notice.className = 'disconnection-notice';
+      notice.innerHTML = `Reconnecting to ${escapeHtml(playerName)}...`;
+      notice.id = `disconnect-${playerId}`;
+      
+      let container = document.getElementById('disconnection-notices');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'disconnection-notices';
+        document.body.appendChild(container);
       }
+      container.appendChild(notice);
+      disconnectionNotices.set(playerId, notice);
+    }
+    
+    function hideDisconnectionNotice(playerId) {
+      const notice = disconnectionNotices.get(playerId);
+      if (notice) {
+        notice.remove();
+        disconnectionNotices.delete(playerId);
+      }
+    }
+    
+    function showHostDisconnectionNotice() {
+      let notice = document.getElementById('host-disconnect-notice');
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.id = 'host-disconnect-notice';
+        notice.className = 'disconnection-notice host-disconnect';
+        notice.innerHTML = 'Reconnecting to host...';
+        document.body.appendChild(notice);
+      }
+      notice.style.display = 'block';
+    }
+    
+    function hideHostDisconnectionNotice() {
+      const notice = document.getElementById('host-disconnect-notice');
+      if (notice) notice.style.display = 'none';
     }
     
     // Handle WebRTC state updates
     function handleWebRTCStateUpdate(state) {
       console.log('WebRTC state update received');
       gameState = webrtcTransport.getPublicState();
+      playerKnowledge = webrtcTransport.getKnowledge();
       updateUI();
     }
     
     // Handle WebRTC connection changes
     function handleWebRTCConnectionChange(event) {
       console.log('WebRTC connection change:', event.type);
-      if (event.type === 'player-connected') {
-        console.log(`Player connected: ${event.name}`);
-      } else if (event.type === 'player-disconnected') {
-        console.log(`Player disconnected: ${event.name}`);
+      
+      switch (event.type) {
+        case 'player-connected':
+          hideDisconnectionNotice(event.playerId);
+          // Update UI to show new player
+          gameState = webrtcTransport.getPublicState();
+          updateUI();
+          break;
+        case 'player-disconnected':
+          showDisconnectionNotice(event.playerId, event.name);
+          break;
+        case 'connected-to-host':
+          hideHostDisconnectionNotice();
+          break;
+        case 'disconnected-from-host':
+          showHostDisconnectionNotice();
+          break;
+        case 'reconnecting':
+          showHostDisconnectionNotice();
+          break;
       }
     }
     
     // Initialize WebRTC transport
     function initWebRTC() {
-      if (typeof WebRTCTransport !== 'undefined' && typeof GameLogic !== 'undefined') {
-        // Initialize WebRTC with game logic
-        initWebRTCTransport(GameLogic);
-        webrtcTransport = new WebRTCTransport();
-        webrtcTransport.onStateUpdate = handleWebRTCStateUpdate;
-        webrtcTransport.onConnectionChange = handleWebRTCConnectionChange;
-        webrtcTransport.onReconnecting = handleReconnectionStatus;
-        console.log('WebRTC transport initialized');
-      } else {
-        console.error('WebRTC or GameLogic not loaded');
+      if (typeof WebRTCTransport === 'undefined') {
+        console.error('WebRTCTransport not loaded');
+        return false;
       }
-    }
-    
-    // Detect server mode on page load
-    async function detectServerMode() {
-      try {
-        const response = await fetch('/api/mode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        const result = await response.json();
-        serverMode = result.mode || 'kv';
-        console.log('Server mode:', serverMode);
-        
-        if (serverMode === 'webrtc') {
-          initWebRTC();
-          console.log('WebRTC mode detected - P2P communication enabled');
-        }
-      } catch (error) {
-        console.log('Mode detection failed, defaulting to KV mode');
-        serverMode = 'kv';
+      if (typeof GameLogic === 'undefined') {
+        console.error('GameLogic not loaded');
+        return false;
       }
-    }
-    
-    // API calls (KV mode uses direct HTTP, WebRTC mode routes through transport)
-    async function api(endpoint, data = {}) {
-      const response = await fetch(`/api/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      const result = await response.json();
-      if (!response.ok || result.error) {
-        throw new Error(result.error || 'Request failed');
-      }
-      return result;
-    }
-    
-    // Perform game action (always uses HTTP, then polls for updated state)
-    async function doGameAction(action, data = {}) {
-      // Map action names to API endpoints
-      const endpointMap = {
-        'start': 'start',
-        'propose': 'propose',
-        'vote': 'vote',
-        'continueFromVote': 'continue_vote',
-        'questVote': 'quest',
-        'continueFromQuest': 'continue',
-        'assassinate': 'assassinate'
-      };
-      const endpoint = endpointMap[action] || action;
-      const result = await api(endpoint, { code: gameCode, playerId, ...data });
       
-      // Immediately poll for updated state after an action
-      await pollGameState();
-      
-      return result;
+      webrtcTransport = new WebRTCTransport();
+      webrtcTransport.onStateUpdate = handleWebRTCStateUpdate;
+      webrtcTransport.onConnectionChange = handleWebRTCConnectionChange;
+      webrtcTransport.onError = (msg) => alert('Error: ' + msg);
+      console.log('WebRTC transport initialized');
+      return true;
+    }
+    
+    // Perform game action via WebRTC
+    function doAction(action, data = {}) {
+      if (!webrtcTransport) {
+        console.error('WebRTC not initialized');
+        return;
+      }
+      webrtcTransport.doAction(action, data);
     }
     
     // Screen management
@@ -1141,8 +1172,8 @@
     }
     
     // Local storage for rejoin
-    function saveSession(code, id) {
-      localStorage.setItem('mightymen_game', JSON.stringify({ code, playerId: id }));
+    function saveSession(code, id, name) {
+      localStorage.setItem('mightymen_game', JSON.stringify({ code, playerId: id, name }));
     }
     
     function loadSession() {
@@ -1160,10 +1191,10 @@
     // Check for existing session on load
     function checkExistingSession() {
       const session = loadSession();
-      if (session) {
+      if (session && session.name) {
         document.getElementById('rejoin-section').classList.remove('hidden');
         document.getElementById('rejoin-info').textContent = 
-          `Game: ${session.code}`;
+          `Game: ${session.code} (${session.name})`;
       }
     }
     
@@ -1207,22 +1238,21 @@
       }
       
       try {
-        // Always use HTTP to create game
-        const result = await api('create', { name });
+        if (!initWebRTC()) {
+          alert('Failed to initialize WebRTC');
+          return;
+        }
+        
+        const result = await webrtcTransport.createGame(name);
         gameCode = result.gameCode;
         playerId = result.playerId;
-        saveSession(gameCode, playerId);
+        saveSession(gameCode, playerId, name);
+        
+        // Get initial state from transport
+        gameState = webrtcTransport.getPublicState();
         showLobby();
         
-        if (serverMode === 'webrtc') {
-          // WebRTC mode: host polls less frequently (every 5 seconds)
-          // Host knows state changes because they trigger them
-          console.log('WebRTC mode: Host with reduced polling');
-          startPolling(5000);
-        } else {
-          // KV mode: normal polling
-          startPolling();
-        }
+        console.log('Game created, waiting for players...');
       } catch (error) {
         alert(error.message);
       }
@@ -1239,49 +1269,55 @@
       }
       
       try {
-        // Always use HTTP to join game
-        const result = await api('join', { code, name });
+        if (!initWebRTC()) {
+          alert('Failed to initialize WebRTC');
+          return;
+        }
+        
+        showHostDisconnectionNotice(); // Show connecting message
+        
+        const result = await webrtcTransport.joinGame(code, name);
         gameCode = result.gameCode;
         playerId = result.playerId;
-        saveSession(gameCode, playerId);
+        saveSession(gameCode, playerId, name);
+        
+        hideHostDisconnectionNotice();
+        
+        // State will come via WebRTC callback
         showLobby();
         
-        if (serverMode === 'webrtc') {
-          // WebRTC mode: players poll every 3 seconds (reduced from 2)
-          console.log('WebRTC mode: Player with reduced polling');
-          startPolling(3000);
-        } else {
-          // KV mode: normal polling
-          startPolling();
-        }
+        console.log('Joined game, connected to host');
       } catch (error) {
+        hideHostDisconnectionNotice();
         alert(error.message);
       }
     }
     
-    // Rejoin game
+    // Rejoin game (after page refresh)
     async function rejoinGame() {
       const session = loadSession();
-      if (!session) return;
+      if (!session || !session.name) return;
       
       try {
-        const result = await api('rejoin', { 
-          code: session.code, 
-          playerId: session.playerId 
-        });
+        if (!initWebRTC()) {
+          alert('Failed to initialize WebRTC');
+          return;
+        }
+        
+        showHostDisconnectionNotice();
+        
+        const result = await webrtcTransport.rejoinGame(session.code, session.name);
         gameCode = result.gameCode;
         playerId = result.playerId;
         
-        // Get initial state to determine which screen to show
-        const stateResult = await api('state', { code: gameCode, playerId });
-        gameState = stateResult.state;
+        hideHostDisconnectionNotice();
         
-        if (gameState.phase === 'lobby') {
-          showLobby();
-        }
+        // State will come via WebRTC callback
+        showLobby();
         
-        startPolling();
+        console.log('Rejoined game');
       } catch (error) {
+        hideHostDisconnectionNotice();
         alert('Could not rejoin game: ' + error.message);
         clearSession();
         document.getElementById('rejoin-section').classList.add('hidden');
@@ -1365,25 +1401,16 @@
     // Start game
     async function startGame() {
       try {
-        await doGameAction('start');
+        await doAction('start');
       } catch (error) {
         alert(error.message);
       }
     }
     
-    // Fetch player knowledge
-    async function fetchKnowledge() {
-      try {
-        if (serverMode === 'webrtc' && webrtcTransport) {
-          // WebRTC mode: get knowledge from local state
-          playerKnowledge = webrtcTransport.getKnowledge();
-        } else {
-          // KV mode: fetch from server
-          const result = await api('knowledge', { code: gameCode, playerId });
-          playerKnowledge = result.knowledge;
-        }
-      } catch (error) {
-        console.error('Failed to fetch knowledge:', error);
+    // Get player knowledge from WebRTC transport
+    function fetchKnowledge() {
+      if (webrtcTransport) {
+        playerKnowledge = webrtcTransport.getKnowledge();
       }
     }
     
@@ -1577,7 +1604,7 @@
       
       proposeBtn.addEventListener('click', async () => {
         try {
-          await doGameAction('propose', { team: Array.from(teamSelectionState.selected) });
+          await doAction('propose', { team: Array.from(teamSelectionState.selected) });
           // Clear selection after successful proposal
           teamSelectionState.selected = new Set();
         } catch (error) {
@@ -1646,7 +1673,7 @@
     // Submit vote
     async function submitVote(approve) {
       try {
-        await doGameAction('vote', { approve });
+        await doAction('vote', { approve });
       } catch (error) {
         alert(error.message);
       }
@@ -1709,7 +1736,7 @@
       if (state.isHost) {
         document.getElementById('btn-continue-vote').addEventListener('click', async () => {
           try {
-            await doGameAction('continueFromVote');
+            await doAction('continueFromVote');
           } catch (error) {
             alert(error.message);
           }
@@ -1787,7 +1814,7 @@
     // Submit quest vote
     async function submitQuestVote(success) {
       try {
-        await doGameAction('questVote', { success });
+        await doAction('questVote', { success });
       } catch (error) {
         alert(error.message);
       }
@@ -1852,7 +1879,7 @@
       if (state.isHost) {
         document.getElementById('btn-continue').addEventListener('click', async () => {
           try {
-            await doGameAction('continueFromQuest');
+            await doAction('continueFromQuest');
           } catch (error) {
             alert(error.message);
           }
@@ -1927,7 +1954,7 @@
         if (!confirm('Are you sure you want to eliminate this person?')) return;
         
         try {
-          await doGameAction('assassinate', { targetId: assassinationState.selectedTarget });
+          await doAction('assassinate', { targetId: assassinationState.selectedTarget });
           // Clear selection after successful assassination
           assassinationState.selectedTarget = null;
         } catch (error) {
@@ -1962,53 +1989,6 @@
           </div>
         `;
       }).join('');
-    }
-    
-    // Poll game state once
-    async function pollGameState() {
-      try {
-        const result = await api('state', { code: gameCode, playerId });
-        const newState = result.state;
-        
-        console.log('[POLL] Got state, phase:', newState.phase);
-        
-        // Check for phase changes that need attention
-        if (gameState) {
-          const phaseChanged = gameState.phase !== newState.phase;
-          if (phaseChanged) {
-            console.log('[POLL] Phase changed from', gameState.phase, 'to', newState.phase);
-          }
-          const needsAction = 
-            (newState.phase === 'team_vote' && !newState.hasVoted) ||
-            (newState.phase === 'quest' && newState.isOnTeam && !newState.hasQuestVoted) ||
-            (newState.phase === 'assassination' && newState.isSaul);
-          
-          if (phaseChanged && needsAction) {
-            playAttentionSound();
-          }
-        }
-        
-        gameState = newState;
-        updateUI();
-      } catch (error) {
-        console.error('Poll error:', error);
-      }
-    }
-    
-    // Polling
-    function startPolling(interval = 2000) {
-      if (pollInterval) clearInterval(pollInterval);
-      
-      // Poll immediately, then at the specified interval
-      pollGameState();
-      pollInterval = setInterval(pollGameState, interval);
-    }
-    
-    function stopPolling() {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
     }
     
     // Update UI based on state
@@ -2051,10 +2031,7 @@
     }
     
     // Initialize
-    document.addEventListener('DOMContentLoaded', async () => {
-      // Detect server mode (KV or WebRTC)
-      await detectServerMode();
-      
+    document.addEventListener('DOMContentLoaded', () => {
       // Check URL for join code
       const params = new URLSearchParams(window.location.search);
       const joinCode = params.get('join');
