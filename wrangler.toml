@@ -1,6 +1,26 @@
+# ============================================================
+# Mighty Men of David - Cloudflare Workers Configuration
+# ============================================================
+# Two deployment modes available:
+#   1. KV Mode (default) - Uses Cloudflare KV for all game state
+#   2. WebRTC Mode - Uses WebRTC for game communication, KV only for signaling
+#
+# To switch modes, comment/uncomment the appropriate "main" line below
+# ============================================================
+
 name = "mighty-men-game"
-main = "src/worker.js"
 compatibility_date = "2024-01-01"
+
+# ============ MODE SELECTION ============
+# Uncomment ONE of the following lines:
+
+# KV Mode - Full server-side state management via Cloudflare KV
+main = "src/worker.js"
+
+# WebRTC Mode - Peer-to-peer game state, KV only for signaling
+# main = "src/worker-webrtc.js"
+
+# ========================================
 
 [vars]
 GAME_EXPIRY_SECONDS = "7200"  # 2 hours

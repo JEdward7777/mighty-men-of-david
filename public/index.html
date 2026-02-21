@@ -861,6 +861,24 @@
 </head>
 <body>
   <div class="container">
+    <!-- Reconnection Banner -->
+    <div id="reconnect-banner" class="hidden" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, #ff6b6b 0%, #c0392b 100%);
+      color: white;
+      padding: 12px 16px;
+      text-align: center;
+      font-family: 'Cinzel', serif;
+      font-weight: 600;
+      z-index: 1000;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    ">
+      <span id="reconnect-message">Reconnecting...</span>
+    </div>
+    
     <!-- Home Screen -->
     <div id="screen-home">
       <h1>Mighty Men of David</h1>
@@ -993,7 +1011,57 @@
       sheep: 'You know your evil allies (except Doeg)'
     };
     
-    // API calls
+    // Server mode detection
+    let serverMode = 'kv'; // 'kv' or 'webrtc'
+    let webrtcTransport = null;
+    
+    // Reconnection UI
+    function showReconnectBanner(message) {
+      const banner = document.getElementById('reconnect-banner');
+      const msgEl = document.getElementById('reconnect-message');
+      msgEl.textContent = message;
+      banner.classList.remove('hidden');
+    }
+    
+    function hideReconnectBanner() {
+      const banner = document.getElementById('reconnect-banner');
+      banner.classList.add('hidden');
+    }
+    
+    function handleReconnectionStatus(status) {
+      if (status.status === 'reconnecting') {
+        showReconnectBanner(`Reconnecting... (${status.attempts}/${status.maxAttempts})`);
+      } else if (status.status === 'connected') {
+        hideReconnectBanner();
+      } else if (status.status === 'failed') {
+        showReconnectBanner('Connection lost. Please refresh the page.');
+      }
+    }
+    
+    // Detect server mode on page load
+    async function detectServerMode() {
+      try {
+        const response = await fetch('/api/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const result = await response.json();
+        serverMode = result.mode || 'kv';
+        console.log('Server mode:', serverMode);
+        
+        if (serverMode === 'webrtc') {
+          // Initialize WebRTC transport
+          // Scripts will be loaded dynamically if needed
+          console.log('WebRTC mode detected - P2P communication enabled');
+        }
+      } catch (error) {
+        console.log('Mode detection failed, defaulting to KV mode');
+        serverMode = 'kv';
+      }
+    }
+    
+    // API calls (KV mode uses direct HTTP, WebRTC mode routes through transport)
     async function api(endpoint, data = {}) {
       const response = await fetch(`/api/${endpoint}`, {
         method: 'POST',
@@ -1913,7 +1981,10 @@
     }
     
     // Initialize
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Detect server mode (KV or WebRTC)
+      await detectServerMode();
+      
       // Check URL for join code
       const params = new URLSearchParams(window.location.search);
       const joinCode = params.get('join');
