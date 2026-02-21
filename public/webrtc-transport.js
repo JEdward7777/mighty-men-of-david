@@ -1,8 +1,30 @@
 // WebRTC Transport Layer for Mighty Men
 // Full P2P communication - no polling, no server state
 
+// Debug logging
+function dbg(category, ...args) {
+  const timestamp = new Date().toISOString().substr(11, 12);
+  console.log(`[${timestamp}][${category}]`, ...args);
+  
+  // Also update debug panel if it exists
+  const panel = document.getElementById('debug-panel');
+  if (panel) {
+    const line = document.createElement('div');
+    line.textContent = `[${timestamp}][${category}] ${args.map(a => 
+      typeof a === 'object' ? JSON.stringify(a) : a
+    ).join(' ')}`;
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+    // Keep only last 50 lines
+    while (panel.children.length > 50) {
+      panel.removeChild(panel.firstChild);
+    }
+  }
+}
+
 class WebRTCTransport {
   constructor() {
+    dbg('INIT', 'Creating WebRTCTransport');
     this.isHost = false;
     this.gameCode = null;
     this.playerId = null;
@@ -39,10 +61,12 @@ class WebRTCTransport {
   // ============ Host Functions ============
   
   async createGame(hostName) {
+    dbg('HOST', 'createGame called with name:', hostName);
     this.isHost = true;
     this.playerName = hostName;
     
     // Register game with server
+    dbg('HOST', 'Calling /api/create');
     const response = await fetch('/api/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -50,17 +74,23 @@ class WebRTCTransport {
     });
     
     const result = await response.json();
+    dbg('HOST', 'Create response:', result);
     if (result.error) throw new Error(result.error);
     
     this.gameCode = result.gameCode;
     this.playerId = result.playerId;
     
     // Initialize game state locally
+    dbg('HOST', 'Creating local game state');
     this.gameState = GameLogic.createGame(hostName);
+    dbg('HOST', 'Initial gameState:', JSON.stringify(this.gameState).substring(0, 200));
+    
     this.gameState.code = this.gameCode;
     this.gameState.hostId = this.playerId;
     this.gameState.players[0].id = this.playerId;
     this.stateTimestamp = Date.now();
+    
+    dbg('HOST', 'Game state players:', this.gameState.players);
     
     // Start listening for players
     this.startHostSignaling();
@@ -69,6 +99,7 @@ class WebRTCTransport {
   }
   
   startHostSignaling() {
+    dbg('HOST', 'Starting signaling poll interval');
     // Poll for new player signals every 2 seconds
     this.signalingInterval = setInterval(() => this.hostPollForPlayers(), 2000);
     this.hostPollForPlayers(); // Check immediately
@@ -83,24 +114,39 @@ class WebRTCTransport {
       });
       
       const result = await response.json();
-      if (result.error) return;
+      if (result.error) {
+        dbg('HOST-POLL', 'Error:', result.error);
+        return;
+      }
+      
+      const pendingCount = Object.keys(result.pendingPlayers || {}).length;
+      if (pendingCount > 0) {
+        dbg('HOST-POLL', `Found ${pendingCount} pending players`);
+      }
       
       // Process each pending player
       for (const [pendingPlayerId, playerData] of Object.entries(result.pendingPlayers || {})) {
         if (!this.connections.has(pendingPlayerId)) {
+          dbg('HOST-POLL', `New player: ${playerData.name} (${pendingPlayerId})`);
           await this.hostConnectToPlayer(pendingPlayerId, playerData);
         }
       }
     } catch (error) {
-      console.error('Error polling for players:', error);
+      dbg('HOST-POLL', 'Exception:', error.message);
     }
   }
   
   async hostConnectToPlayer(playerId, playerData) {
-    console.log(`Host connecting to player: ${playerData.name}`);
+    dbg('HOST-CONN', `Connecting to player: ${playerData.name}`);
+    dbg('HOST-CONN', `playerData keys: ${Object.keys(playerData)}`);
     
     // Skip if no offer yet or already have answer
-    if (!playerData.offer || playerData.answer) {
+    if (!playerData.offer) {
+      dbg('HOST-CONN', 'No offer yet, skipping');
+      return;
+    }
+    if (playerData.answer) {
+      dbg('HOST-CONN', 'Already has answer, skipping');
       return;
     }
     
@@ -382,16 +428,26 @@ class WebRTCTransport {
   }
   
   async playerConnectToHost() {
+    dbg('PLAYER', 'playerConnectToHost called');
     const pc = new RTCPeerConnection(this.iceServers);
     this.hostConnection = { pc, dataChannel: null, connected: false };
     
+    pc.oniceconnectionstatechange = () => {
+      dbg('PLAYER-ICE', `ICE state: ${pc.iceConnectionState}`);
+    };
+    
+    pc.onconnectionstatechange = () => {
+      dbg('PLAYER-CONN', `Connection state: ${pc.connectionState}`);
+    };
+    
     // Handle data channel from host
     pc.ondatachannel = (event) => {
+      dbg('PLAYER', 'Received data channel from host');
       const dataChannel = event.channel;
       this.hostConnection.dataChannel = dataChannel;
       
       dataChannel.onopen = () => {
-        console.log('Connected to host!');
+        dbg('PLAYER', 'Data channel OPEN - connected to host!');
         this.hostConnection.connected = true;
         
         if (this.onConnectionChange) {
@@ -400,7 +456,7 @@ class WebRTCTransport {
       };
       
       dataChannel.onclose = () => {
-        console.log('Disconnected from host');
+        dbg('PLAYER', 'Data channel CLOSED');
         this.hostConnection.connected = false;
         
         if (this.onConnectionChange) {
@@ -417,8 +473,10 @@ class WebRTCTransport {
     };
     
     // Create offer
+    dbg('PLAYER', 'Creating offer');
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    dbg('PLAYER', 'Local description set, waiting for ICE gathering');
     
     // Wait for ICE gathering
     await new Promise((resolve) => {
@@ -426,13 +484,21 @@ class WebRTCTransport {
         resolve();
       } else {
         pc.onicegatheringstatechange = () => {
+          dbg('PLAYER-ICE', `Gathering state: ${pc.iceGatheringState}`);
           if (pc.iceGatheringState === 'complete') resolve();
         };
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          dbg('PLAYER-ICE', 'ICE gathering timeout');
+          resolve();
+        }, 10000);
       }
     });
     
+    dbg('PLAYER', 'ICE gathering complete, posting offer');
+    
     // Post our offer to server
-    await fetch('/api/signal/player', {
+    const postResult = await fetch('/api/signal/player', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -442,8 +508,11 @@ class WebRTCTransport {
         signal: pc.localDescription
       })
     });
+    const postJson = await postResult.json();
+    dbg('PLAYER', 'Posted offer, response:', postJson);
     
     // Poll for host's answer
+    dbg('PLAYER', 'Waiting for host answer...');
     await this.waitForHostAnswer(pc);
   }
   
@@ -462,6 +531,7 @@ class WebRTCTransport {
         const result = await response.json();
         
         if (result.answer) {
+          dbg('PLAYER', 'Got answer from host!');
           console.log('Got answer from host');
           await pc.setRemoteDescription(new RTCSessionDescription(result.answer));
           return;
@@ -525,8 +595,14 @@ class WebRTCTransport {
   // ============ State Access ============
   
   getPublicState() {
-    if (!this.gameState) return null;
-    return GameLogic.getPublicGameState(this.gameState, this.playerId);
+    dbg('STATE', `getPublicState called, gameState exists: ${!!this.gameState}, playerId: ${this.playerId}`);
+    if (!this.gameState) {
+      dbg('STATE', 'No gameState, returning null');
+      return null;
+    }
+    const publicState = GameLogic.getPublicGameState(this.gameState, this.playerId);
+    dbg('STATE', `Public state phase: ${publicState?.phase}, players: ${publicState?.players?.length}`);
+    return publicState;
   }
   
   getKnowledge() {

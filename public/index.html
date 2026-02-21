@@ -896,6 +896,31 @@
   </style>
 </head>
 <body>
+  <!-- Debug Panel (toggle with D key) -->
+  <div id="debug-panel" style="
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 200px;
+    background: rgba(0, 0, 0, 0.9);
+    color: #0f0;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 8px;
+    overflow-y: auto;
+    z-index: 9999;
+  "></div>
+  <script>
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'd' || e.key === 'D') {
+        const panel = document.getElementById('debug-panel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+  </script>
+  
   <div class="container">
     <!-- Reconnection Banner -->
     <div id="reconnect-banner" class="hidden" style="
@@ -1238,22 +1263,37 @@
       }
       
       try {
+        console.log('[UI] Creating game for:', name);
+        
         if (!initWebRTC()) {
           alert('Failed to initialize WebRTC');
           return;
         }
         
+        console.log('[UI] WebRTC initialized, calling createGame');
         const result = await webrtcTransport.createGame(name);
         gameCode = result.gameCode;
         playerId = result.playerId;
         saveSession(gameCode, playerId, name);
         
+        console.log('[UI] Game created, getting state');
         // Get initial state from transport
         gameState = webrtcTransport.getPublicState();
+        console.log('[UI] Got gameState:', gameState);
+        
         showLobby();
         
-        console.log('Game created, waiting for players...');
+        // Update lobby with current state
+        if (gameState) {
+          console.log('[UI] Updating lobby with state');
+          updateLobby(gameState);
+        } else {
+          console.log('[UI] WARNING: gameState is null!');
+        }
+        
+        console.log('[UI] Game created, waiting for players...');
       } catch (error) {
+        console.error('[UI] Create game error:', error);
         alert(error.message);
       }
     }
