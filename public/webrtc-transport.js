@@ -154,94 +154,113 @@ class WebRTCTransport {
     const connection = { pc, dataChannel: null, name: playerData.name, connected: false };
     this.connections.set(playerId, connection);
     
-    // Create data channel
-    const dataChannel = pc.createDataChannel('game');
-    connection.dataChannel = dataChannel;
+    dbg('HOST-CONN', 'Created RTCPeerConnection');
     
-    dataChannel.onopen = () => {
-      console.log(`Connected to player: ${playerData.name}`);
-      connection.connected = true;
-      this.disconnectedPlayers.delete(playerId);
-      
-      // Add player to game state
-      const joinResult = GameLogic.GameActions.join(this.gameState, playerData.name);
-      // Update player ID to match
-      const newPlayer = this.gameState.players.find(p => p.id === joinResult.playerId);
-      if (newPlayer) {
-        newPlayer.id = playerId;
-      }
-      this.stateTimestamp = Date.now();
-      
-      // Register player in KV for reconnection
-      this.registerPlayerInKV(playerId, playerData.name);
-      
-      // Send current state to new player
-      this.sendToPlayer(playerId, {
-        type: 'state',
-        state: this.gameState,
-        timestamp: this.stateTimestamp,
-        yourPlayerId: playerId
-      });
-      
-      // Notify all other players and update host UI
-      this.broadcastState();
-      
-      if (this.onStateUpdate) {
-        this.onStateUpdate(this.gameState);
-      }
-      
-      if (this.onConnectionChange) {
-        this.onConnectionChange({ type: 'player-connected', playerId, name: playerData.name });
-      }
-      
-      // Clear from pending after successful connection
-      fetch('/api/signal/clear-player', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: this.gameCode,
-          playerId: this.playerId,
-          clearPlayerId: playerId
-        })
-      });
+    pc.oniceconnectionstatechange = () => {
+      dbg('HOST-ICE', `ICE state for ${playerData.name}: ${pc.iceConnectionState}`);
     };
     
-    dataChannel.onclose = () => {
-      console.log(`Player disconnected: ${playerData.name}`);
-      connection.connected = false;
-      this.disconnectedPlayers.add(playerId);
-      
-      if (this.onConnectionChange) {
-        this.onConnectionChange({ type: 'player-disconnected', playerId, name: playerData.name });
-      }
+    pc.onconnectionstatechange = () => {
+      dbg('HOST-CONN', `Connection state for ${playerData.name}: ${pc.connectionState}`);
     };
     
-    dataChannel.onmessage = (event) => {
-      this.hostHandleMessage(playerId, JSON.parse(event.data));
+    // Host is answerer, so we receive the data channel from player (offerer)
+    pc.ondatachannel = (event) => {
+      dbg('HOST-CONN', `Received data channel from ${playerData.name}`);
+      const dataChannel = event.channel;
+      connection.dataChannel = dataChannel;
+      
+      dataChannel.onopen = () => {
+        dbg('HOST-CONN', `Data channel OPEN for ${playerData.name}`);
+        connection.connected = true;
+        this.disconnectedPlayers.delete(playerId);
+        
+        // Add player to game state
+        const joinResult = GameLogic.GameActions.join(this.gameState, playerData.name);
+        const newPlayer = this.gameState.players.find(p => p.id === joinResult.playerId);
+        if (newPlayer) {
+          newPlayer.id = playerId;
+        }
+        this.stateTimestamp = Date.now();
+        
+        // Register player in KV for reconnection
+        this.registerPlayerInKV(playerId, playerData.name);
+        
+        // Send current state to new player
+        this.sendToPlayer(playerId, {
+          type: 'state',
+          state: this.gameState,
+          timestamp: this.stateTimestamp,
+          yourPlayerId: playerId
+        });
+        
+        // Notify all other players and update host UI
+        this.broadcastState();
+        
+        if (this.onStateUpdate) {
+          this.onStateUpdate(this.gameState);
+        }
+        
+        if (this.onConnectionChange) {
+          this.onConnectionChange({ type: 'player-connected', playerId, name: playerData.name });
+        }
+        
+        // Clear from pending after successful connection
+        fetch('/api/signal/clear-player', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: this.gameCode,
+            playerId: this.playerId,
+            clearPlayerId: playerId
+          })
+        });
+      };
+      
+      dataChannel.onclose = () => {
+        dbg('HOST-CONN', `Data channel CLOSED for ${playerData.name}`);
+        connection.connected = false;
+        this.disconnectedPlayers.add(playerId);
+        
+        if (this.onConnectionChange) {
+          this.onConnectionChange({ type: 'player-disconnected', playerId, name: playerData.name });
+        }
+      };
+      
+      dataChannel.onmessage = (event) => {
+        this.hostHandleMessage(playerId, JSON.parse(event.data));
+      };
     };
     
     // Set remote description (player's offer)
     try {
+      dbg('HOST-CONN', 'Setting remote description (player offer)');
       await pc.setRemoteDescription(new RTCSessionDescription(playerData.offer));
+      dbg('HOST-CONN', 'Remote description set');
       
       // Create and set answer
+      dbg('HOST-CONN', 'Creating answer');
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      dbg('HOST-CONN', 'Local description (answer) set');
       
       // Wait for ICE gathering
+      dbg('HOST-CONN', 'Waiting for ICE gathering');
       await new Promise((resolve) => {
         if (pc.iceGatheringState === 'complete') {
           resolve();
         } else {
           pc.onicegatheringstatechange = () => {
+            dbg('HOST-ICE', `Gathering state: ${pc.iceGatheringState}`);
             if (pc.iceGatheringState === 'complete') resolve();
           };
-          // Timeout after 5 seconds
           setTimeout(resolve, 5000);
         }
       });
+      dbg('HOST-CONN', 'ICE gathering complete');
       
       // Post our answer for this specific player
+      dbg('HOST-CONN', 'Posting answer to server');
       await fetch('/api/signal/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -253,8 +272,9 @@ class WebRTCTransport {
         })
       });
       
-      console.log(`Posted answer for player: ${playerData.name}`);
+      dbg('HOST-CONN', `Posted answer for ${playerData.name}`);
     } catch (error) {
+      dbg('HOST-CONN', `ERROR: ${error.message}`);
       console.error(`Error connecting to player ${playerData.name}:`, error);
       this.connections.delete(playerId);
     }
@@ -440,36 +460,35 @@ class WebRTCTransport {
       dbg('PLAYER-CONN', `Connection state: ${pc.connectionState}`);
     };
     
-    // Handle data channel from host
-    pc.ondatachannel = (event) => {
-      dbg('PLAYER', 'Received data channel from host');
-      const dataChannel = event.channel;
-      this.hostConnection.dataChannel = dataChannel;
+    // Player is offerer, so WE create the data channel
+    dbg('PLAYER', 'Creating data channel');
+    const dataChannel = pc.createDataChannel('game');
+    this.hostConnection.dataChannel = dataChannel;
+    
+    dataChannel.onopen = () => {
+      dbg('PLAYER', 'Data channel OPEN - connected to host!');
+      this.hostConnection.connected = true;
       
-      dataChannel.onopen = () => {
-        dbg('PLAYER', 'Data channel OPEN - connected to host!');
-        this.hostConnection.connected = true;
-        
-        if (this.onConnectionChange) {
-          this.onConnectionChange({ type: 'connected-to-host' });
-        }
-      };
+      if (this.onConnectionChange) {
+        this.onConnectionChange({ type: 'connected-to-host' });
+      }
+    };
+    
+    dataChannel.onclose = () => {
+      dbg('PLAYER', 'Data channel CLOSED');
+      this.hostConnection.connected = false;
       
-      dataChannel.onclose = () => {
-        dbg('PLAYER', 'Data channel CLOSED');
-        this.hostConnection.connected = false;
-        
-        if (this.onConnectionChange) {
-          this.onConnectionChange({ type: 'disconnected-from-host' });
-        }
-        
-        // Try to reconnect
-        this.playerAttemptReconnect();
-      };
+      if (this.onConnectionChange) {
+        this.onConnectionChange({ type: 'disconnected-from-host' });
+      }
       
-      dataChannel.onmessage = (event) => {
-        this.playerHandleMessage(JSON.parse(event.data));
-      };
+      // Try to reconnect
+      this.playerAttemptReconnect();
+    };
+    
+    dataChannel.onmessage = (event) => {
+      dbg('PLAYER', 'Received message from host');
+      this.playerHandleMessage(JSON.parse(event.data));
     };
     
     // Create offer
