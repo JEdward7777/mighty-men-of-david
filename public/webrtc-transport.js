@@ -43,11 +43,11 @@ class WebRTCTransport {
     this.isHost = true;
     this.playerName = hostName;
     
-    // Create game on server (get game code)
+    // Create game on server (get game code and player ID)
     const response = await fetch('/api/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hostName })
+      body: JSON.stringify({ name: hostName })
     });
     
     const result = await response.json();
@@ -55,7 +55,12 @@ class WebRTCTransport {
     
     this.gameCode = result.gameCode;
     this.playerId = result.playerId;
-    this.gameState = result.initialState;
+    
+    // Create local game state (host manages state locally)
+    this.gameState = GameLogic.createGame(hostName);
+    this.gameState.code = this.gameCode;
+    this.gameState.hostId = this.playerId;
+    this.gameState.players[0].id = this.playerId;
     
     // Start listening for new players
     await this.hostStartSignaling();
@@ -383,22 +388,25 @@ class WebRTCTransport {
     this.isHost = false;
     this.gameCode = gameCode.toUpperCase();
     this.playerName = playerName;
-    this.playerId = 'p_' + Math.random().toString(36).substring(2, 18);
     
-    // Check if game exists and host is available
-    const checkResponse = await fetch('/api/check', {
+    // Join game via HTTP first (gets server-assigned player ID and validates game exists)
+    const joinResponse = await fetch('/api/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: this.gameCode })
+      body: JSON.stringify({ code: this.gameCode, name: playerName })
     });
     
-    const checkResult = await checkResponse.json();
-    if (!checkResult.exists) {
-      throw new Error('Game not found');
+    const joinResult = await joinResponse.json();
+    if (joinResult.error) {
+      throw new Error(joinResult.error);
     }
     
-    // Connect to host
-    await this.playerConnectToHost();
+    this.playerId = joinResult.playerId;
+    this.gameCode = joinResult.gameCode;
+    
+    // Now we're registered with the server - state updates will come via polling
+    // (In full WebRTC mode, we'd connect to host via WebRTC here)
+    // For now, the server handles state so we just return
     
     return {
       gameCode: this.gameCode,

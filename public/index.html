@@ -981,6 +981,11 @@
   <!-- QR Code Library - using qrcodejs which works better in browsers -->
   <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
   
+  <!-- Game logic for WebRTC mode (client-side state management) -->
+  <script src="/game-logic-client.js"></script>
+  <!-- WebRTC transport layer -->
+  <script src="/webrtc-transport.js"></script>
+  
   <script>
     // Game state
     let gameState = null;
@@ -1038,6 +1043,38 @@
       }
     }
     
+    // Handle WebRTC state updates
+    function handleWebRTCStateUpdate(state) {
+      console.log('WebRTC state update received');
+      gameState = webrtcTransport.getPublicState();
+      updateUI();
+    }
+    
+    // Handle WebRTC connection changes
+    function handleWebRTCConnectionChange(event) {
+      console.log('WebRTC connection change:', event.type);
+      if (event.type === 'player-connected') {
+        console.log(`Player connected: ${event.name}`);
+      } else if (event.type === 'player-disconnected') {
+        console.log(`Player disconnected: ${event.name}`);
+      }
+    }
+    
+    // Initialize WebRTC transport
+    function initWebRTC() {
+      if (typeof WebRTCTransport !== 'undefined' && typeof GameLogic !== 'undefined') {
+        // Initialize WebRTC with game logic
+        initWebRTCTransport(GameLogic);
+        webrtcTransport = new WebRTCTransport();
+        webrtcTransport.onStateUpdate = handleWebRTCStateUpdate;
+        webrtcTransport.onConnectionChange = handleWebRTCConnectionChange;
+        webrtcTransport.onReconnecting = handleReconnectionStatus;
+        console.log('WebRTC transport initialized');
+      } else {
+        console.error('WebRTC or GameLogic not loaded');
+      }
+    }
+    
     // Detect server mode on page load
     async function detectServerMode() {
       try {
@@ -1051,8 +1088,7 @@
         console.log('Server mode:', serverMode);
         
         if (serverMode === 'webrtc') {
-          // Initialize WebRTC transport
-          // Scripts will be loaded dynamically if needed
+          initWebRTC();
           console.log('WebRTC mode detected - P2P communication enabled');
         }
       } catch (error) {
@@ -1072,6 +1108,27 @@
       if (!response.ok || result.error) {
         throw new Error(result.error || 'Request failed');
       }
+      return result;
+    }
+    
+    // Perform game action (always uses HTTP, then polls for updated state)
+    async function doGameAction(action, data = {}) {
+      // Map action names to API endpoints
+      const endpointMap = {
+        'start': 'start',
+        'propose': 'propose',
+        'vote': 'vote',
+        'continueFromVote': 'continue_vote',
+        'questVote': 'quest',
+        'continueFromQuest': 'continue',
+        'assassinate': 'assassinate'
+      };
+      const endpoint = endpointMap[action] || action;
+      const result = await api(endpoint, { code: gameCode, playerId, ...data });
+      
+      // Immediately poll for updated state after an action
+      await pollGameState();
+      
       return result;
     }
     
@@ -1150,12 +1207,22 @@
       }
       
       try {
+        // Always use HTTP to create game
         const result = await api('create', { name });
         gameCode = result.gameCode;
         playerId = result.playerId;
         saveSession(gameCode, playerId);
         showLobby();
-        startPolling();
+        
+        if (serverMode === 'webrtc') {
+          // WebRTC mode: host polls less frequently (every 5 seconds)
+          // Host knows state changes because they trigger them
+          console.log('WebRTC mode: Host with reduced polling');
+          startPolling(5000);
+        } else {
+          // KV mode: normal polling
+          startPolling();
+        }
       } catch (error) {
         alert(error.message);
       }
@@ -1172,12 +1239,21 @@
       }
       
       try {
+        // Always use HTTP to join game
         const result = await api('join', { code, name });
         gameCode = result.gameCode;
         playerId = result.playerId;
         saveSession(gameCode, playerId);
         showLobby();
-        startPolling();
+        
+        if (serverMode === 'webrtc') {
+          // WebRTC mode: players poll every 3 seconds (reduced from 2)
+          console.log('WebRTC mode: Player with reduced polling');
+          startPolling(3000);
+        } else {
+          // KV mode: normal polling
+          startPolling();
+        }
       } catch (error) {
         alert(error.message);
       }
@@ -1289,7 +1365,7 @@
     // Start game
     async function startGame() {
       try {
-        await api('start', { code: gameCode, playerId });
+        await doGameAction('start');
       } catch (error) {
         alert(error.message);
       }
@@ -1298,8 +1374,14 @@
     // Fetch player knowledge
     async function fetchKnowledge() {
       try {
-        const result = await api('knowledge', { code: gameCode, playerId });
-        playerKnowledge = result.knowledge;
+        if (serverMode === 'webrtc' && webrtcTransport) {
+          // WebRTC mode: get knowledge from local state
+          playerKnowledge = webrtcTransport.getKnowledge();
+        } else {
+          // KV mode: fetch from server
+          const result = await api('knowledge', { code: gameCode, playerId });
+          playerKnowledge = result.knowledge;
+        }
       } catch (error) {
         console.error('Failed to fetch knowledge:', error);
       }
@@ -1495,11 +1577,7 @@
       
       proposeBtn.addEventListener('click', async () => {
         try {
-          await api('propose', { 
-            code: gameCode, 
-            playerId, 
-            team: Array.from(teamSelectionState.selected) 
-          });
+          await doGameAction('propose', { team: Array.from(teamSelectionState.selected) });
           // Clear selection after successful proposal
           teamSelectionState.selected = new Set();
         } catch (error) {
@@ -1568,9 +1646,7 @@
     // Submit vote
     async function submitVote(approve) {
       try {
-        await api('vote', { code: gameCode, playerId, approve });
-        // Immediately refresh state to show waiting screen
-        await pollGameState();
+        await doGameAction('vote', { approve });
       } catch (error) {
         alert(error.message);
       }
@@ -1633,8 +1709,7 @@
       if (state.isHost) {
         document.getElementById('btn-continue-vote').addEventListener('click', async () => {
           try {
-            await api('continue_vote', { code: gameCode, playerId });
-            await pollGameState();
+            await doGameAction('continueFromVote');
           } catch (error) {
             alert(error.message);
           }
@@ -1712,9 +1787,7 @@
     // Submit quest vote
     async function submitQuestVote(success) {
       try {
-        await api('quest', { code: gameCode, playerId, success });
-        // Immediately refresh state to show waiting screen
-        await pollGameState();
+        await doGameAction('questVote', { success });
       } catch (error) {
         alert(error.message);
       }
@@ -1779,8 +1852,7 @@
       if (state.isHost) {
         document.getElementById('btn-continue').addEventListener('click', async () => {
           try {
-            await api('continue', { code: gameCode, playerId });
-            await pollGameState();
+            await doGameAction('continueFromQuest');
           } catch (error) {
             alert(error.message);
           }
@@ -1855,11 +1927,7 @@
         if (!confirm('Are you sure you want to eliminate this person?')) return;
         
         try {
-          await api('assassinate', { 
-            code: gameCode, 
-            playerId, 
-            targetId: assassinationState.selectedTarget 
-          });
+          await doGameAction('assassinate', { targetId: assassinationState.selectedTarget });
           // Clear selection after successful assassination
           assassinationState.selectedTarget = null;
         } catch (error) {
@@ -1928,10 +1996,12 @@
     }
     
     // Polling
-    function startPolling() {
+    function startPolling(interval = 2000) {
       if (pollInterval) clearInterval(pollInterval);
       
-      pollInterval = setInterval(pollGameState, 1000);
+      // Poll immediately, then at the specified interval
+      pollGameState();
+      pollInterval = setInterval(pollGameState, interval);
     }
     
     function stopPolling() {
