@@ -6,6 +6,7 @@ import {
   GAME_PHASES,
   createGame,
   getPublicGameState,
+  getPlayerKnowledge,
   GameActions
 } from './game-logic.js';
 
@@ -91,29 +92,272 @@ async function handleApiRequest(path, body, env) {
     // Create game structure (host will maintain full state)
     const game = createGame(name);
     
-    // Store minimal game info in KV (just for discovery)
-    const gameInfo = {
-      code: game.code,
-      hostId: game.hostId,
-      hostName: name,
-      createdAt: game.createdAt,
-      // Host's signaling data will be added when they post it
-      hostSignal: null,
-      // Pending player signals (players waiting to connect)
-      pendingPlayers: {}
-    };
-    
-    await env.GAMES.put(`game:${game.code}`, JSON.stringify(gameInfo), {
+    // Store full game state in KV (WebRTC mode still uses KV as backup)
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
       expirationTtl: GAME_EXPIRY_SECONDS
     });
     
     return {
       success: true,
       gameCode: game.code,
-      playerId: game.hostId,
-      // Return full game state for host to maintain locally
-      initialState: game
+      playerId: game.hostId
     };
+  }
+  
+  // ============ Join Game ============
+  if (path === '/api/join') {
+    const { code, name } = body;
+    if (!code || !name) {
+      throw new Error('Game code and name are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    const result = GameActions.join(game, name);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return {
+      success: true,
+      playerId: result.playerId,
+      gameCode: game.code
+    };
+  }
+  
+  // ============ Rejoin Game ============
+  if (path === '/api/rejoin') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    const result = GameActions.rejoin(game, playerId);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return {
+      success: true,
+      playerName: result.playerName,
+      gameCode: game.code,
+      playerId: playerId
+    };
+  }
+  
+  // ============ Get Game State ============
+  if (path === '/api/state') {
+    const { code, playerId } = body;
+    if (!code) {
+      throw new Error('Game code is required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    const state = getPublicGameState(game, playerId);
+    
+    return { success: true, state };
+  }
+  
+  // ============ Get Player Knowledge ============
+  if (path === '/api/knowledge') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    const knowledge = getPlayerKnowledge(game, playerId);
+    
+    if (!knowledge) {
+      throw new Error('Player not found or game not started');
+    }
+    
+    return { success: true, knowledge };
+  }
+  
+  // ============ Start Game ============
+  if (path === '/api/start') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.start(game, playerId);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // ============ Propose Team ============
+  if (path === '/api/propose') {
+    const { code, playerId, team } = body;
+    if (!code || !playerId || !team) {
+      throw new Error('Game code, player ID, and team are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.propose(game, playerId, team);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // ============ Vote on Team ============
+  if (path === '/api/vote') {
+    const { code, playerId, approve } = body;
+    if (!code || !playerId || approve === undefined) {
+      throw new Error('Game code, player ID, and vote are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.vote(game, playerId, approve);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // ============ Continue from Vote Result ============
+  if (path === '/api/continue_vote') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.continueFromVote(game, playerId);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // ============ Quest Vote ============
+  if (path === '/api/quest') {
+    const { code, playerId, success } = body;
+    if (!code || !playerId || success === undefined) {
+      throw new Error('Game code, player ID, and quest vote are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    const result = GameActions.questVote(game, playerId, success);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    if (result.questComplete) {
+      return {
+        success: true,
+        questComplete: true,
+        questSuccess: result.questResult.success,
+        failCount: result.questResult.failCount
+      };
+    }
+    
+    return { success: true };
+  }
+  
+  // ============ Continue from Quest Result ============
+  if (path === '/api/continue') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.continueFromQuest(game, playerId);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // ============ Assassination ============
+  if (path === '/api/assassinate') {
+    const { code, playerId, targetId } = body;
+    if (!code || !playerId || !targetId) {
+      throw new Error('Game code, player ID, and target are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) {
+      throw new Error('Game not found');
+    }
+    
+    const game = JSON.parse(gameData);
+    GameActions.assassinate(game, playerId, targetId);
+    
+    await env.GAMES.put(`game:${game.code}`, JSON.stringify(game), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
   }
   
   // ============ Host Signal Registration ============
