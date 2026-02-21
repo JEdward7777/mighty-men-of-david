@@ -99,6 +99,11 @@ class WebRTCTransport {
   async hostConnectToPlayer(playerId, playerData) {
     console.log(`Host connecting to player: ${playerData.name}`);
     
+    // Skip if no offer yet or already have answer
+    if (!playerData.offer || playerData.answer) {
+      return;
+    }
+    
     const pc = new RTCPeerConnection(this.iceServers);
     const connection = { pc, dataChannel: null, name: playerData.name, connected: false };
     this.connections.set(playerId, connection);
@@ -132,12 +137,27 @@ class WebRTCTransport {
         yourPlayerId: playerId
       });
       
-      // Notify all other players
+      // Notify all other players and update host UI
       this.broadcastState();
+      
+      if (this.onStateUpdate) {
+        this.onStateUpdate(this.gameState);
+      }
       
       if (this.onConnectionChange) {
         this.onConnectionChange({ type: 'player-connected', playerId, name: playerData.name });
       }
+      
+      // Clear from pending after successful connection
+      fetch('/api/signal/clear-player', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: this.gameCode,
+          playerId: this.playerId,
+          clearPlayerId: playerId
+        })
+      });
     };
     
     dataChannel.onclose = () => {
@@ -154,39 +174,44 @@ class WebRTCTransport {
       this.hostHandleMessage(playerId, JSON.parse(event.data));
     };
     
-    // ICE candidate handling
-    pc.onicecandidate = async (event) => {
-      if (event.candidate === null) {
-        // All candidates gathered, post our answer
-        await fetch('/api/signal/host', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: this.gameCode,
-            playerId: this.playerId,
-            signal: { type: 'answer', sdp: pc.localDescription, forPlayer: playerId }
-          })
-        });
-      }
-    };
-    
     // Set remote description (player's offer)
-    await pc.setRemoteDescription(new RTCSessionDescription(playerData.signal));
-    
-    // Create and set answer
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    
-    // Clear this player from pending
-    await fetch('/api/signal/clear-player', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code: this.gameCode,
-        playerId: this.playerId,
-        clearPlayerId: playerId
-      })
-    });
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(playerData.offer));
+      
+      // Create and set answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      // Wait for ICE gathering
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+        } else {
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === 'complete') resolve();
+          };
+          // Timeout after 5 seconds
+          setTimeout(resolve, 5000);
+        }
+      });
+      
+      // Post our answer for this specific player
+      await fetch('/api/signal/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: this.gameCode,
+          playerId: this.playerId,
+          forPlayerId: playerId,
+          signal: pc.localDescription
+        })
+      });
+      
+      console.log(`Posted answer for player: ${playerData.name}`);
+    } catch (error) {
+      console.error(`Error connecting to player ${playerData.name}:`, error);
+      this.connections.delete(playerId);
+    }
   }
   
   async registerPlayerInKV(playerId, name) {
@@ -427,17 +452,22 @@ class WebRTCTransport {
     let attempts = 0;
     
     while (attempts < maxAttempts) {
-      const response = await fetch('/api/signal/get-host', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: this.gameCode })
-      });
-      
-      const result = await response.json();
-      
-      if (result.signal?.type === 'answer' && result.signal.forPlayer === this.playerId) {
-        await pc.setRemoteDescription(new RTCSessionDescription(result.signal.sdp));
-        return;
+      try {
+        const response = await fetch('/api/signal/get-answer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: this.gameCode, playerId: this.playerId })
+        });
+        
+        const result = await response.json();
+        
+        if (result.answer) {
+          console.log('Got answer from host');
+          await pc.setRemoteDescription(new RTCSessionDescription(result.answer));
+          return;
+        }
+      } catch (error) {
+        console.error('Error polling for answer:', error);
       }
       
       await new Promise(r => setTimeout(r, 1000));

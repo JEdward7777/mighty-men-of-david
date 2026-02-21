@@ -212,7 +212,7 @@ async function handleApiRequest(path, body, env) {
     };
   }
   
-  // Player Signal - Player posts WebRTC answer
+  // Player Signal - Player posts WebRTC offer
   if (path === '/api/signal/player') {
     const { code, playerId, name, signal } = body;
     if (!code || !playerId || !name || !signal) {
@@ -226,7 +226,8 @@ async function handleApiRequest(path, body, env) {
     
     gameInfo.pendingPlayers[playerId] = {
       name: name,
-      signal: signal,
+      offer: signal,        // Player's offer
+      answer: null,         // Host will fill this in
       timestamp: Date.now()
     };
     
@@ -237,7 +238,7 @@ async function handleApiRequest(path, body, env) {
     return { success: true };
   }
   
-  // Get Pending Players - Host polls for new player signals
+  // Get Pending Players - Host polls for new player offers
   if (path === '/api/signal/get-players') {
     const { code, playerId } = body;
     if (!code || !playerId) {
@@ -254,6 +255,53 @@ async function handleApiRequest(path, body, env) {
     }
     
     return { success: true, pendingPlayers: gameInfo.pendingPlayers || {} };
+  }
+  
+  // Host Answer - Host posts answer for a specific player
+  if (path === '/api/signal/answer') {
+    const { code, playerId, forPlayerId, signal } = body;
+    if (!code || !playerId || !forPlayerId || !signal) {
+      throw new Error('Game code, player ID, target player ID, and signal are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) throw new Error('Game not found');
+    
+    const gameInfo = JSON.parse(gameData);
+    
+    if (gameInfo.hostId !== playerId) {
+      throw new Error('Only the host can post answers');
+    }
+    
+    if (gameInfo.pendingPlayers[forPlayerId]) {
+      gameInfo.pendingPlayers[forPlayerId].answer = signal;
+    }
+    
+    await env.GAMES.put(`game:${gameInfo.code}`, JSON.stringify(gameInfo), {
+      expirationTtl: GAME_EXPIRY_SECONDS
+    });
+    
+    return { success: true };
+  }
+  
+  // Get Answer - Player polls for host's answer
+  if (path === '/api/signal/get-answer') {
+    const { code, playerId } = body;
+    if (!code || !playerId) {
+      throw new Error('Game code and player ID are required');
+    }
+    
+    const gameData = await env.GAMES.get(`game:${code.toUpperCase()}`);
+    if (!gameData) throw new Error('Game not found');
+    
+    const gameInfo = JSON.parse(gameData);
+    
+    const pending = gameInfo.pendingPlayers[playerId];
+    if (!pending) {
+      return { success: true, answer: null, notFound: true };
+    }
+    
+    return { success: true, answer: pending.answer };
   }
   
   // Clear Pending Player - Host removes player after connecting
