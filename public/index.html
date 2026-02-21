@@ -1298,7 +1298,7 @@
       }
     }
     
-    // Join game
+    // Join game - also handles rejoin if name matches existing player/host
     async function joinGame() {
       const code = document.getElementById('join-code').value.trim().toUpperCase();
       const name = document.getElementById('join-name').value.trim();
@@ -1316,7 +1316,11 @@
         
         showHostDisconnectionNotice(); // Show connecting message
         
-        const result = await webrtcTransport.joinGame(code, name);
+        // First check if this name already exists in the game (rejoin scenario)
+        // This handles both host reconnection and player reconnection
+        console.log('[UI] Checking if this is a rejoin...');
+        const result = await webrtcTransport.rejoinGame(code, name);
+        
         gameCode = result.gameCode;
         playerId = result.playerId;
         saveSession(gameCode, playerId, name);
@@ -1326,10 +1330,29 @@
         // State will come via WebRTC callback
         showLobby();
         
-        console.log('Joined game, connected to host');
+        console.log(`Joined/Rejoined game as ${result.isHost ? 'HOST' : 'player'}`);
       } catch (error) {
-        hideHostDisconnectionNotice();
-        alert(error.message);
+        // If rejoin fails (name not found), try joining as new player
+        if (error.message.includes('No player with that name')) {
+          console.log('[UI] Not a rejoin, joining as new player');
+          try {
+            const result = await webrtcTransport.joinGame(code, name);
+            gameCode = result.gameCode;
+            playerId = result.playerId;
+            saveSession(gameCode, playerId, name);
+            
+            hideHostDisconnectionNotice();
+            showLobby();
+            
+            console.log('Joined game as new player');
+          } catch (joinError) {
+            hideHostDisconnectionNotice();
+            alert(joinError.message);
+          }
+        } else {
+          hideHostDisconnectionNotice();
+          alert(error.message);
+        }
       }
     }
     
