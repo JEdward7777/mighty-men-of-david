@@ -83,19 +83,19 @@ async function handleApiRequest(path, body, env) {
   // ============ Game Creation ============
   // Host creates a game and registers in KV
   if (path === '/api/create') {
-    const { hostName } = body;
-    if (!hostName) {
-      throw new Error('Host name is required');
+    const { name } = body;
+    if (!name) {
+      throw new Error('Name is required');
     }
     
     // Create game structure (host will maintain full state)
-    const game = createGame(hostName);
+    const game = createGame(name);
     
     // Store minimal game info in KV (just for discovery)
     const gameInfo = {
       code: game.code,
       hostId: game.hostId,
-      hostName: hostName,
+      hostName: name,
       createdAt: game.createdAt,
       // Host's signaling data will be added when they post it
       hostSignal: null,
