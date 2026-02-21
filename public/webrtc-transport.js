@@ -212,20 +212,26 @@ class WebRTCTransport {
         // Register player in KV for reconnection
         this.registerPlayerInKV(playerId, playerData.name);
         
-        // Send current state to reconnecting/new player
-        dbg('HOST-CONN', `Sending state to ${playerData.name}`);
-        this.sendToPlayer(playerId, {
-          type: 'state',
-          state: this.gameState,
-          timestamp: this.stateTimestamp,
-          yourPlayerId: playerId
-        });
-        
-        // Notify all other players and update host UI
-        this.broadcastState();
-        
-        if (this.onStateUpdate) {
-          this.onStateUpdate(this.gameState);
+        if (this.gameState) {
+          // Normal case: send current state to player
+          dbg('HOST-CONN', `Sending state to ${playerData.name}`);
+          this.sendToPlayer(playerId, {
+            type: 'state',
+            state: this.gameState,
+            timestamp: this.stateTimestamp,
+            yourPlayerId: playerId
+          });
+          
+          // Notify all other players and update host UI
+          this.broadcastState();
+          
+          if (this.onStateUpdate) {
+            this.onStateUpdate(this.gameState);
+          }
+        } else {
+          // Host recovery: request state from this player
+          dbg('HOST-CONN', `Requesting state from ${playerData.name} (host recovery)`);
+          this.sendToPlayer(playerId, { type: 'request-state', yourPlayerId: playerId });
         }
         
         if (this.onConnectionChange) {
@@ -320,7 +326,7 @@ class WebRTCTransport {
   }
   
   hostHandleMessage(fromPlayerId, message) {
-    console.log(`Message from ${fromPlayerId}:`, message.type);
+    dbg('HOST-MSG', `Message from ${fromPlayerId}: ${message.type}`);
     
     switch (message.type) {
       case 'action':
@@ -336,10 +342,26 @@ class WebRTCTransport {
         break;
       case 'state-recovery':
         // Player sending their state for host recovery
-        if (message.timestamp < this.stateTimestamp || !this.gameState) {
+        dbg('HOST-MSG', `Received state-recovery, our state: ${!!this.gameState}`);
+        if (!this.gameState) {
+          dbg('HOST-MSG', 'Using player state for recovery');
           this.gameState = message.state;
-          this.stateTimestamp = message.timestamp;
-          console.log('Recovered state from player');
+          this.stateTimestamp = message.timestamp || Date.now();
+          
+          // Update host's playerId in the recovered state
+          const hostPlayer = this.gameState.players.find(p => p.isHost);
+          if (hostPlayer) {
+            hostPlayer.id = this.playerId;
+          }
+          this.gameState.hostId = this.playerId;
+          
+          // Now broadcast recovered state to all connected players
+          this.broadcastState();
+          
+          // Update host UI
+          if (this.onStateUpdate) {
+            this.onStateUpdate(this.gameState);
+          }
         }
         break;
     }
@@ -438,10 +460,11 @@ class WebRTCTransport {
   }
   
   async rejoinGame(gameCode, playerName) {
+    dbg('REJOIN', `Attempting rejoin: code=${gameCode}, name=${playerName}`);
     this.gameCode = gameCode.toUpperCase();
     this.playerName = playerName;
     
-    // Look up player ID by name
+    // Look up player ID by name - server tells us if we're the host
     const response = await fetch('/api/rejoin-by-name', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -449,16 +472,21 @@ class WebRTCTransport {
     });
     
     const result = await response.json();
+    dbg('REJOIN', `Server response:`, result);
     if (result.error) throw new Error(result.error);
     
     this.playerId = result.playerId;
     this.isHost = result.isHost;
     
+    dbg('REJOIN', `isHost: ${this.isHost}, playerId: ${this.playerId}`);
+    
     if (this.isHost) {
       // Rejoining as host - need to recover state from players
+      dbg('REJOIN', 'I am the HOST - starting host rejoin');
       await this.hostRejoin();
     } else {
       // Rejoining as player - connect to host
+      dbg('REJOIN', 'I am a PLAYER - connecting to host');
       await this.playerConnectToHost();
     }
     
@@ -466,12 +494,13 @@ class WebRTCTransport {
   }
   
   async hostRejoin() {
-    // Host lost state, need to get it from players
+    dbg('HOST', 'Host rejoining - will recover state from players');
     this.isHost = true;
+    this.gameState = null;  // We lost our state
+    this.stateTimestamp = 0;
     this.startHostSignaling();
     
-    // Wait for players to reconnect and send state
-    // The first player to connect will send their state
+    // Players will reconnect and we'll request state from them
   }
   
   async playerConnectToHost() {
@@ -594,8 +623,11 @@ class WebRTCTransport {
   }
   
   playerHandleMessage(message) {
+    dbg('PLAYER-MSG', `Received: ${message.type}`);
+    
     switch (message.type) {
       case 'state':
+        dbg('PLAYER-MSG', `Got state, phase: ${message.state?.phase}`);
         this.gameState = message.state;
         this.stateTimestamp = message.timestamp;
         if (message.yourPlayerId) {
@@ -603,6 +635,23 @@ class WebRTCTransport {
         }
         if (this.onStateUpdate) {
           this.onStateUpdate(this.gameState);
+        }
+        break;
+      case 'request-state':
+        // Host is requesting our state (host recovery scenario)
+        dbg('PLAYER-MSG', 'Host requesting state for recovery');
+        if (message.yourPlayerId) {
+          this.playerId = message.yourPlayerId;
+        }
+        if (this.gameState) {
+          dbg('PLAYER-MSG', 'Sending our state to host');
+          this.sendToHost({
+            type: 'state-recovery',
+            state: this.gameState,
+            timestamp: this.stateTimestamp
+          });
+        } else {
+          dbg('PLAYER-MSG', 'We have no state to send!');
         }
         break;
       case 'error':

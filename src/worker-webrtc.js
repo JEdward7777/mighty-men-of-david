@@ -116,6 +116,7 @@ async function handleApiRequest(path, body, env) {
   }
   
   // Rejoin by Name - Player reconnects using game code + name
+  // If name matches hostName, they are the host
   if (path === '/api/rejoin-by-name') {
     const { code, name } = body;
     if (!code || !name) throw new Error('Game code and name are required');
@@ -125,8 +126,22 @@ async function handleApiRequest(path, body, env) {
     
     const gameInfo = JSON.parse(gameData);
     
+    // Check if this is the host by comparing to stored hostName
+    const isHost = gameInfo.hostName.toLowerCase() === name.toLowerCase();
+    
+    if (isHost) {
+      // This is the host reconnecting
+      return {
+        success: true,
+        playerId: gameInfo.hostId,
+        isHost: true,
+        gameCode: gameInfo.code
+      };
+    }
+    
+    // Not the host - look for player in players array
     const player = gameInfo.players.find(p => 
-      p.name.toLowerCase() === name.toLowerCase()
+      p.name.toLowerCase() === name.toLowerCase() && !p.isHost
     );
     
     if (!player) {
@@ -136,7 +151,7 @@ async function handleApiRequest(path, body, env) {
     return {
       success: true,
       playerId: player.id,
-      isHost: player.isHost,
+      isHost: false,
       gameCode: gameInfo.code
     };
   }
