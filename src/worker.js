@@ -93,12 +93,12 @@ async function handleApiRequest(path, body, env) {
   
   // Create a new game
   if (path === '/api/create') {
-    const { hostName } = body;
-    if (!hostName) {
-      throw new Error('Host name is required');
+    const { name } = body;
+    if (!name) {
+      throw new Error('Name is required');
     }
     
-    const game = createGame(hostName);
+    const game = createGame(name);
     await saveGame(game);
     
     return {
@@ -110,13 +110,13 @@ async function handleApiRequest(path, body, env) {
   
   // Join an existing game
   if (path === '/api/join') {
-    const { code, playerName } = body;
-    if (!code || !playerName) {
-      throw new Error('Game code and player name are required');
+    const { code, name } = body;
+    if (!code || !name) {
+      throw new Error('Game code and name are required');
     }
     
     const game = await getGame(code);
-    const result = GameActions.join(game, playerName);
+    const result = GameActions.join(game, name);
     await saveGame(game);
     
     return {
