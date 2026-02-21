@@ -2,6 +2,13 @@
 
 A biblical-themed social deduction game inspired by Avalon. Players take on the roles of David's loyal followers or Saul's treacherous servants in a battle of wits and deception.
 
+## ������ Play Online
+
+**Live game:** https://mighty-men-game.hootowl7777-cloud.workers.dev
+
+Create a game, share the code with friends, and play together!
+
+
 ## 🎮 How to Play
 
 ### Overview
