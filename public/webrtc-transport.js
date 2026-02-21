@@ -126,8 +126,19 @@ class WebRTCTransport {
       
       // Process each pending player
       for (const [pendingPlayerId, playerData] of Object.entries(result.pendingPlayers || {})) {
-        if (!this.connections.has(pendingPlayerId)) {
+        const existingConn = this.connections.get(pendingPlayerId);
+        
+        // Process if: no connection, OR existing connection is disconnected (reconnection)
+        if (!existingConn) {
           dbg('HOST-POLL', `New player: ${playerData.name} (${pendingPlayerId})`);
+          await this.hostConnectToPlayer(pendingPlayerId, playerData);
+        } else if (!existingConn.connected || existingConn.pc?.connectionState === 'disconnected' || existingConn.pc?.connectionState === 'failed') {
+          dbg('HOST-POLL', `Reconnecting player: ${playerData.name} (${pendingPlayerId})`);
+          // Clean up old connection
+          existingConn.dataChannel?.close();
+          existingConn.pc?.close();
+          this.connections.delete(pendingPlayerId);
+          // Create new connection
           await this.hostConnectToPlayer(pendingPlayerId, playerData);
         }
       }
@@ -175,18 +186,34 @@ class WebRTCTransport {
         connection.connected = true;
         this.disconnectedPlayers.delete(playerId);
         
-        // Add player to game state
-        const joinResult = GameLogic.GameActions.join(this.gameState, playerData.name);
-        const newPlayer = this.gameState.players.find(p => p.id === joinResult.playerId);
-        if (newPlayer) {
-          newPlayer.id = playerId;
+        // Check if this is a reconnecting player (same name exists)
+        const existingPlayer = this.gameState.players.find(
+          p => p.name.toLowerCase() === playerData.name.toLowerCase() && p.id !== this.playerId
+        );
+        
+        if (existingPlayer) {
+          // Reconnecting player - update their ID and mark connected
+          dbg('HOST-CONN', `Reconnecting player: ${playerData.name}, old ID: ${existingPlayer.id}, new ID: ${playerId}`);
+          existingPlayer.id = playerId;
+          existingPlayer.connected = true;
+          existingPlayer.lastSeen = Date.now();
+        } else {
+          // New player - add to game state
+          dbg('HOST-CONN', `New player joining: ${playerData.name}`);
+          const joinResult = GameLogic.GameActions.join(this.gameState, playerData.name);
+          const newPlayer = this.gameState.players.find(p => p.id === joinResult.playerId);
+          if (newPlayer) {
+            newPlayer.id = playerId;
+          }
         }
+        
         this.stateTimestamp = Date.now();
         
         // Register player in KV for reconnection
         this.registerPlayerInKV(playerId, playerData.name);
         
-        // Send current state to new player
+        // Send current state to reconnecting/new player
+        dbg('HOST-CONN', `Sending state to ${playerData.name}`);
         this.sendToPlayer(playerId, {
           type: 'state',
           state: this.gameState,
