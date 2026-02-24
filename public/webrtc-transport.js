@@ -56,6 +56,15 @@ class WebRTCTransport {
     
     // Connection status tracking
     this.disconnectedPlayers = new Set();
+    
+    // Heartbeat system
+    this.heartbeatInterval = null;      // Host broadcasts heartbeat
+    this.lastHeartbeatReceived = 0;     // Client tracks when last heartbeat received
+    this.heartbeatTimeoutMs = 5000;     // 5 second timeout for client to detect disconnection
+    
+    // Reconnection backoff
+    this.reconnectDelays = [1000, 2000, 4000, 8000, 16000]; // Exponential backoff, capped at 16s
+    this.reconnectAttempt = 0;
   }
   
   // ============ Host Functions ============
@@ -103,6 +112,62 @@ class WebRTCTransport {
     // Poll for new player signals every 2 seconds
     this.signalingInterval = setInterval(() => this.hostPollForPlayers(), 2000);
     this.hostPollForPlayers(); // Check immediately
+    
+    // Start heartbeat broadcast
+    this.startHeartbeat();
+  }
+  
+  // ============ Heartbeat System ============
+  
+  startHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    // Broadcast heartbeat every 2 seconds so clients know we're alive
+    this.heartbeatInterval = setInterval(() => this.hostBroadcastHeartbeat(), 2000);
+    dbg('HEARTBEAT', 'Host heartbeat broadcast started');
+  }
+  
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+  
+  hostBroadcastHeartbeat() {
+    // Broadcast heartbeat to all connected players
+    const message = { type: 'heartbeat', timestamp: Date.now() };
+    for (const [playerId, conn] of this.connections) {
+      if (conn.connected && conn.dataChannel?.readyState === 'open') {
+        try {
+          conn.dataChannel.send(JSON.stringify(message));
+        } catch (e) {
+          dbg('HEARTBEAT', `Failed to send heartbeat to ${playerId}: ${e.message}`);
+        }
+      }
+    }
+  }
+  
+  // Check if client has received heartbeat recently (called periodically)
+  checkHeartbeatTimeout() {
+    if (this.isHost) return; // Host doesn't need to check
+    
+    const now = Date.now();
+    const elapsed = now - this.lastHeartbeatReceived;
+    
+    if (this.lastHeartbeatReceived > 0 && elapsed > this.heartbeatTimeoutMs) {
+      dbg('HEARTBEAT', `No heartbeat for ${elapsed}ms, triggering reconnection`);
+      this.lastHeartbeatReceived = 0; // Reset to avoid repeated triggers
+      this.playerAttemptReconnect();
+    }
+  }
+  
+  // Start heartbeat monitoring for clients
+  startHeartbeatMonitoring() {
+    // Check for heartbeat timeout every second
+    setInterval(() => this.checkHeartbeatTimeout(), 1000);
+    this.lastHeartbeatReceived = Date.now(); // Initialize
   }
   
   async hostPollForPlayers() {
@@ -525,6 +590,12 @@ class WebRTCTransport {
       dbg('PLAYER', 'Data channel OPEN - connected to host!');
       this.hostConnection.connected = true;
       
+      // Reset reconnection attempt counter on successful connection
+      this.reconnectAttempt = 0;
+      
+      // Start heartbeat monitoring to detect future disconnections
+      this.startHeartbeatMonitoring();
+      
       if (this.onConnectionChange) {
         this.onConnectionChange({ type: 'connected-to-host' });
       }
@@ -626,6 +697,11 @@ class WebRTCTransport {
     dbg('PLAYER-MSG', `Received: ${message.type}`);
     
     switch (message.type) {
+      case 'heartbeat':
+        // Update heartbeat timestamp - host is alive
+        this.lastHeartbeatReceived = Date.now();
+        dbg('HEARTBEAT', `Received heartbeat, elapsed: ${Date.now() - this.lastHeartbeatReceived}ms`);
+        break;
       case 'state':
         dbg('PLAYER-MSG', `Got state, phase: ${message.state?.phase}`);
         this.gameState = message.state;
@@ -669,21 +745,31 @@ class WebRTCTransport {
   }
   
   async playerAttemptReconnect() {
-    console.log('Attempting to reconnect to host...');
+    dbg('RECONNECT', `Attempting to reconnect to host (attempt ${this.reconnectAttempt + 1})`);
     
     if (this.onConnectionChange) {
       this.onConnectionChange({ type: 'reconnecting' });
     }
     
-    // Wait a bit then try again
-    await new Promise(r => setTimeout(r, 2000));
+    // Calculate delay with exponential backoff and jitter
+    const delayIndex = Math.min(this.reconnectAttempt, this.reconnectDelays.length - 1);
+    const baseDelay = this.reconnectDelays[delayIndex];
+    // Add ±25% jitter
+    const jitter = (Math.random() * 0.5 - 0.25) * baseDelay;
+    const delay = Math.max(500, Math.round(baseDelay + jitter)); // Minimum 500ms
+    
+    dbg('RECONNECT', `Waiting ${delay}ms before reconnect attempt`);
+    await new Promise(r => setTimeout(r, delay));
     
     try {
       await this.playerConnectToHost();
+      dbg('RECONNECT', 'Reconnection successful!');
+      this.reconnectAttempt = 0; // Reset on success
     } catch (error) {
-      console.error('Reconnection failed:', error);
-      // Try again
-      setTimeout(() => this.playerAttemptReconnect(), 5000);
+      dbg('RECONNECT', `Reconnection failed: ${error.message}`);
+      this.reconnectAttempt++;
+      // Try again with exponential backoff
+      setTimeout(() => this.playerAttemptReconnect(), 0);
     }
   }
   
@@ -728,6 +814,9 @@ class WebRTCTransport {
     if (this.signalingInterval) {
       clearInterval(this.signalingInterval);
     }
+    
+    // Clean up heartbeat interval
+    this.stopHeartbeat();
     
     for (const conn of this.connections.values()) {
       conn.dataChannel?.close();
