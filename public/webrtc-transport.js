@@ -65,6 +65,7 @@ class WebRTCTransport {
     // Reconnection backoff
     this.reconnectDelays = [1000, 2000, 4000, 8000, 16000]; // Exponential backoff, capped at 16s
     this.reconnectAttempt = 0;
+    this.reconnectTimeoutId = null; // Track pending reconnection timeout
   }
   
   // ============ Host Functions ============
@@ -664,6 +665,13 @@ class WebRTCTransport {
       dbg('PLAYER', 'Data channel OPEN - connected to host!');
       this.hostConnection.connected = true;
       
+      // Cancel any pending reconnection attempts
+      if (this.reconnectTimeoutId) {
+        clearTimeout(this.reconnectTimeoutId);
+        this.reconnectTimeoutId = null;
+        dbg('PLAYER', 'Cancelled pending reconnection attempt');
+      }
+      
       // Reset reconnection attempt counter on successful connection
       this.reconnectAttempt = 0;
       
@@ -839,11 +847,12 @@ class WebRTCTransport {
       await this.playerConnectToHost();
       dbg('RECONNECT', 'Reconnection successful!');
       this.reconnectAttempt = 0; // Reset on success
+      this.reconnectTimeoutId = null; // Ensure cleared
     } catch (error) {
       dbg('RECONNECT', `Reconnection failed: ${error.message}`);
       this.reconnectAttempt++;
       // Try again with exponential backoff
-      setTimeout(() => this.playerAttemptReconnect(), 0);
+      this.reconnectTimeoutId = setTimeout(() => this.playerAttemptReconnect(), 0);
     }
   }
   

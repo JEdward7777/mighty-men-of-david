@@ -964,6 +964,25 @@
     });
   </script>
   
+  <!-- Always-visible Game Code Display -->
+  <div id="game-code-display" style="
+    display: none;
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: rgba(44, 24, 16, 0.9);
+    color: #c9a227;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'Cinzel', serif;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  ">
+    Code: <span id="display-game-code"></span>
+  </div>
+  
   <div class="container">
     <!-- Reconnection Banner -->
     <div id="reconnect-banner" class="hidden" style="
@@ -1237,6 +1256,12 @@
         el.classList.add('hidden');
       });
       document.getElementById(screenId).classList.remove('hidden');
+      
+      // Show/hide game code display based on screen
+      const codeDisplay = document.getElementById('game-code-display');
+      if (screenId === 'screen-home') {
+        codeDisplay.style.display = 'none';
+      }
     }
     
     // Local storage for rejoin
@@ -1434,6 +1459,8 @@
     function showLobby() {
       showScreen('screen-lobby');
       document.getElementById('lobby-code').textContent = gameCode;
+      document.getElementById('display-game-code').textContent = gameCode;
+      document.getElementById('game-code-display').style.display = 'block';
       const joinUrl = window.location.origin + '?join=' + gameCode;
       
       // Generate QR code
@@ -2114,6 +2141,7 @@
         case 'quest_result':
         case 'assassination':
           showScreen('screen-game');
+          document.getElementById('game-code-display').style.display = 'block';
           if (!playerKnowledge) {
             await fetchKnowledge();
           }
