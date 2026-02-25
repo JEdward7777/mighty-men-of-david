@@ -170,6 +170,25 @@ class WebRTCTransport {
     this.lastHeartbeatReceived = Date.now(); // Initialize
   }
   
+  // Finalize state recovery after collecting states from multiple players
+  _finalizeStateRecovery() {
+    if (!this.gameState) return;
+    
+    dbg('HOST-MSG', `Finalizing state recovery, best version: ${this._recoveredStateVersion} from ${this._recoveredStateSender}`);
+    
+    // Broadcast recovered state to all connected players
+    this.broadcastState();
+    
+    // Update host UI
+    if (this.onStateUpdate) {
+      this.onStateUpdate(this.gameState);
+    }
+    
+    // Clear recovery tracking
+    this._recoveredStateVersion = null;
+    this._recoveredStateSender = null;
+  }
+  
   async hostPollForPlayers() {
     try {
       const response = await fetch('/api/signal/get-players', {
@@ -407,11 +426,15 @@ class WebRTCTransport {
         break;
       case 'state-recovery':
         // Player sending their state for host recovery
-        dbg('HOST-MSG', `Received state-recovery, our state: ${!!this.gameState}`);
+        dbg('HOST-MSG', `Received state-recovery from ${fromPlayerId}, version: ${message.state?.version}, our state: ${!!this.gameState}`);
+        
         if (!this.gameState) {
-          dbg('HOST-MSG', 'Using player state for recovery');
+          // First state received - use it as initial candidate
+          dbg('HOST-MSG', 'Using first player state as candidate');
           this.gameState = message.state;
           this.stateTimestamp = message.timestamp || Date.now();
+          this._recoveredStateVersion = message.state?.version || 0;
+          this._recoveredStateSender = fromPlayerId;
           
           // Update host's playerId in the recovered state
           const hostPlayer = this.gameState.players.find(p => p.isHost);
@@ -420,13 +443,21 @@ class WebRTCTransport {
           }
           this.gameState.hostId = this.playerId;
           
-          // Now broadcast recovered state to all connected players
-          this.broadcastState();
+          // Set a timeout to finalize state after collecting more candidates
+          setTimeout(() => this._finalizeStateRecovery(), 2000);
+        } else if (message.state?.version > this._recoveredStateVersion) {
+          // This state is newer - update candidate
+          dbg('HOST-MSG', `Found newer state (version ${message.state.version} > ${this._recoveredStateVersion})`);
+          this.gameState = message.state;
+          this._recoveredStateVersion = message.state.version;
+          this._recoveredStateSender = fromPlayerId;
           
-          // Update host UI
-          if (this.onStateUpdate) {
-            this.onStateUpdate(this.gameState);
+          // Update host's playerId in the recovered state
+          const hostPlayer = this.gameState.players.find(p => p.isHost);
+          if (hostPlayer) {
+            hostPlayer.id = this.playerId;
           }
+          this.gameState.hostId = this.playerId;
         }
         break;
     }

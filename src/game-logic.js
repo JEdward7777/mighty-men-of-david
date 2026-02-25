@@ -186,6 +186,7 @@ function createGame(hostName) {
     assassinationTarget: null,
     winner: null,  // 'good' or 'evil'
     winReason: null,
+    version: 0,     // Incremented on each state change for recovery
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
@@ -276,6 +277,12 @@ function getPublicGameState(game, playerId) {
 // These are pure functions that don't touch storage
 
 const GameActions = {
+  // Helper to increment version and update timestamp
+  _incrementVersion(game) {
+    game.version++;
+    game.updatedAt = Date.now();
+  },
+  
   // Join an existing game
   join(game, playerName) {
     if (game.phase !== GAME_PHASES.LOBBY) {
@@ -299,7 +306,7 @@ const GameActions = {
       connected: true,
       lastSeen: Date.now()
     });
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     return { playerId: newPlayerId };
   },
@@ -313,7 +320,7 @@ const GameActions = {
     
     player.connected = true;
     player.lastSeen = Date.now();
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     return { playerName: player.name };
   },
@@ -342,7 +349,7 @@ const GameActions = {
     // Randomize leader
     game.leaderIndex = Math.floor(Math.random() * game.players.length);
     game.phase = GAME_PHASES.TEAM_SELECTION;
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     return { success: true };
   },
@@ -372,7 +379,7 @@ const GameActions = {
     game.proposedTeam = team;
     game.votes = {};
     game.phase = GAME_PHASES.TEAM_VOTE;
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     return { success: true };
   },
@@ -392,7 +399,7 @@ const GameActions = {
     }
     
     game.votes[playerId] = !!approve;
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     // Check if all votes are in
     if (Object.keys(game.votes).length === game.players.length) {
@@ -447,7 +454,7 @@ const GameActions = {
       }
     }
     
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     return { success: true };
   },
   
@@ -473,7 +480,7 @@ const GameActions = {
     }
     
     game.questVotes[playerId] = !!success;
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     let questComplete = false;
     let questResult = null;
@@ -530,7 +537,7 @@ const GameActions = {
       game.phase = GAME_PHASES.TEAM_SELECTION;
     }
     
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     return { success: true };
   },
   
@@ -561,7 +568,7 @@ const GameActions = {
     }
     
     game.phase = GAME_PHASES.GAME_OVER;
-    game.updatedAt = Date.now();
+    this._incrementVersion(game);
     
     return { success: true };
   }
