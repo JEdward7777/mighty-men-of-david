@@ -109,8 +109,8 @@ class WebRTCTransport {
   
   startHostSignaling() {
     dbg('HOST', 'Starting signaling poll interval');
-    // Poll for new player signals every 2 seconds
-    this.signalingInterval = setInterval(() => this.hostPollForPlayers(), 2000);
+    // Poll for new player signals every 4 seconds
+    this.signalingInterval = setInterval(() => this.hostPollForPlayers(), 4000);
     this.hostPollForPlayers(); // Check immediately
     
     // Start heartbeat broadcast
