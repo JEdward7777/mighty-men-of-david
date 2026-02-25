@@ -892,6 +892,27 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
+    
+    /* Debug panel copy button */
+    #debug-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: #333;
+      color: #0f0;
+      border: 1px solid #0f0;
+      border-radius: 3px;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-family: monospace;
+      cursor: pointer;
+      z-index: 10000;
+    }
+    
+    #debug-copy-btn:hover {
+      background: #0f0;
+      color: #000;
+    }
   </style>
 </head>
 <body>
@@ -908,15 +929,38 @@
     font-family: monospace;
     font-size: 11px;
     padding: 8px;
+    padding-top: 28px;
     overflow-y: auto;
     z-index: 9999;
-  "></div>
+  ">
+    <div style="
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      font-size: 10px;
+      color: #0f0;
+    ">DEBUG</div>
+    <button id="debug-copy-btn">Copy</button>
+  </div>
   <script>
     document.addEventListener('keydown', (e) => {
       if (e.key === 'd' || e.key === 'D') {
         const panel = document.getElementById('debug-panel');
         panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
       }
+    });
+    
+    // Copy debug log to clipboard
+    document.getElementById('debug-copy-btn').addEventListener('click', () => {
+      const panel = document.getElementById('debug-panel');
+      const text = panel.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('debug-copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+        }, 1000);
+      });
     });
   </script>
   

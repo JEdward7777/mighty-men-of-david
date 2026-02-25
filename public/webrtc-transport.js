@@ -172,9 +172,12 @@ class WebRTCTransport {
   
   // Finalize state recovery after collecting states from multiple players
   _finalizeStateRecovery() {
-    if (!this.gameState) return;
+    if (!this.gameState) {
+      dbg('HOST-MSG', '_finalizeStateRecovery called but no gameState!');
+      return;
+    }
     
-    dbg('HOST-MSG', `Finalizing state recovery, best version: ${this._recoveredStateVersion} from ${this._recoveredStateSender}`);
+    dbg('HOST-MSG', `Finalizing state recovery, best version: ${this._recoveredStateVersion} from ${this._recoveredStateSender}, phase: ${this.gameState.phase}, players: ${this.gameState.players?.length}`);
     
     // Broadcast recovered state to all connected players
     this.broadcastState();
@@ -270,6 +273,36 @@ class WebRTCTransport {
         connection.connected = true;
         this.disconnectedPlayers.delete(playerId);
         
+        // Check if we're in host recovery mode (no gameState yet)
+        if (!this.gameState) {
+          // Host recovery: skip player matching, just register connection
+          dbg('HOST-CONN', `Host recovery mode - deferring player processing until state recovered`);
+          
+          // Register player in KV for reconnection
+          this.registerPlayerInKV(playerId, playerData.name);
+          
+          // Request state from this player
+          dbg('HOST-CONN', `Requesting state from ${playerData.name} (host recovery)`);
+          this.sendToPlayer(playerId, { type: 'request-state', yourPlayerId: playerId });
+          
+          if (this.onConnectionChange) {
+            this.onConnectionChange({ type: 'player-connected', playerId, name: playerData.name });
+          }
+          
+          // Clear from pending after successful connection
+          fetch('/api/signal/clear-player', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code: this.gameCode,
+              playerId: this.playerId,
+              clearPlayerId: playerId
+            })
+          });
+          return;
+        }
+        
+        // Normal case: we have gameState, process player normally
         // Check if this is a reconnecting player (same name exists)
         const existingPlayer = this.gameState.players.find(
           p => p.name.toLowerCase() === playerData.name.toLowerCase() && p.id !== this.playerId
@@ -295,6 +328,9 @@ class WebRTCTransport {
         
         // Register player in KV for reconnection
         this.registerPlayerInKV(playerId, playerData.name);
+        
+        // DEBUG: Log gameState status before deciding recovery path
+        dbg('HOST-CONN', `Data channel OPEN for ${playerData.name}, gameState exists: ${!!this.gameState}, isHostRecovery: ${!this.gameState}`);
         
         if (this.gameState) {
           // Normal case: send current state to player
@@ -426,7 +462,7 @@ class WebRTCTransport {
         break;
       case 'state-recovery':
         // Player sending their state for host recovery
-        dbg('HOST-MSG', `Received state-recovery from ${fromPlayerId}, version: ${message.state?.version}, our state: ${!!this.gameState}`);
+        dbg('HOST-MSG', `Received state-recovery from ${fromPlayerId}, version: ${message.state?.version}, phase: ${message.state?.phase}, our state exists: ${!!this.gameState}, our recoveredVersion: ${this._recoveredStateVersion}`);
         
         if (!this.gameState) {
           // First state received - use it as initial candidate
@@ -443,11 +479,13 @@ class WebRTCTransport {
           }
           this.gameState.hostId = this.playerId;
           
+          dbg('HOST-MSG', `State recovered, phase: ${this.gameState.phase}, players: ${this.gameState.players?.length}, setting 2s timeout to finalize`);
+          
           // Set a timeout to finalize state after collecting more candidates
           setTimeout(() => this._finalizeStateRecovery(), 2000);
         } else if (message.state?.version > this._recoveredStateVersion) {
           // This state is newer - update candidate
-          dbg('HOST-MSG', `Found newer state (version ${message.state.version} > ${this._recoveredStateVersion})`);
+          dbg('HOST-MSG', `Found newer state (version ${message.state.version} > ${this._recoveredStateVersion}), updating`);
           this.gameState = message.state;
           this._recoveredStateVersion = message.state.version;
           this._recoveredStateSender = fromPlayerId;
@@ -458,6 +496,8 @@ class WebRTCTransport {
             hostPlayer.id = this.playerId;
           }
           this.gameState.hostId = this.playerId;
+        } else {
+          dbg('HOST-MSG', `Ignoring state, version ${message.state?.version} <= ${this._recoveredStateVersion}`);
         }
         break;
     }
@@ -517,8 +557,11 @@ class WebRTCTransport {
   
   sendToPlayer(playerId, message) {
     const conn = this.connections.get(playerId);
+    dbg('SEND', `sendToPlayer to ${conn?.name || playerId}, type: ${message.type}, connected: ${conn?.connected}, readyState: ${conn?.dataChannel?.readyState}`);
     if (conn?.connected && conn.dataChannel?.readyState === 'open') {
       conn.dataChannel.send(JSON.stringify(message));
+    } else {
+      dbg('SEND', `FAILED to send to ${playerId} - not connected or channel not open`);
     }
   }
   
@@ -746,12 +789,12 @@ class WebRTCTransport {
         break;
       case 'request-state':
         // Host is requesting our state (host recovery scenario)
-        dbg('PLAYER-MSG', 'Host requesting state for recovery');
+        dbg('PLAYER-MSG', `Host requesting state for recovery, our gameState exists: ${!!this.gameState}, phase: ${this.gameState?.phase}`);
         if (message.yourPlayerId) {
           this.playerId = message.yourPlayerId;
         }
         if (this.gameState) {
-          dbg('PLAYER-MSG', 'Sending our state to host');
+          dbg('PLAYER-MSG', `Sending our state to host, version: ${this.gameState.version}, players: ${this.gameState.players?.length}`);
           this.sendToHost({
             type: 'state-recovery',
             state: this.gameState,
