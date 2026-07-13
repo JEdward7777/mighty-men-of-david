@@ -5,32 +5,31 @@ A multiplayer social deduction game inspired by Avalon with a biblical theme. Pl
 
 ## Architecture
 
-### Deployment Modes
-The game supports two deployment modes, controlled via `wrangler.toml`:
+The game is **server-authoritative** using a Cloudflare **Durable Object**.
+(It previously used WebRTC peer-to-peer, which did not work across networks —
+see `harness/ISSUES.md` A1. That code was removed; history is in `harness/`.)
 
-1. **KV Mode** (`src/worker.js`) - Default
-   - All game state stored in Cloudflare KV
-   - Clients poll server for state updates
-   - Simple, reliable, but more KV operations
-
-2. **WebRTC Mode** (`src/worker-webrtc.js`)
-   - Host's browser maintains game state
-   - Clients connect via WebRTC data channels
-   - KV only used for initial signaling/ICE exchange
-   - Reduces KV load, real-time updates
+- One `GameRoom` Durable Object per game code holds the authoritative state.
+- Players connect over a **WebSocket** (`/api/ws?code=XXXX`).
+- The DO runs all game rules and sends each player only *their own* filtered view
+  (`getPublicGameState` + `getPlayerKnowledge`) — secret roles never reach other
+  players' browsers.
+- The DO processes one message at a time behind the input gate, so simultaneous
+  votes cannot race (no explicit locking needed).
+- Reconnection uses a per-player `token` (issued by the DO, stored in
+  `localStorage`), so state survives a host/player refresh and seats can't be
+  hijacked by name.
 
 ### File Structure
 ```
 src/
-  game-logic.js      # Shared game logic (roles, phases, validation)
-  worker.js          # KV mode - Cloudflare Worker
-  worker-webrtc.js   # WebRTC mode - signaling only
-dev-server.js        # Local development server (uses game-logic.js)
+  game-logic.js      # Shared game rules (roles, phases, validation) — ESM
+  worker.js          # Worker entry + GameRoom Durable Object
 public/
-  index.html         # Main frontend (supports both modes)
-  game-logic-client.js  # Client-side game logic for WebRTC mode
-  webrtc-transport.js   # WebRTC connection management
-wrangler.toml        # Cloudflare deployment config (mode selection)
+  index.html         # Frontend (single-page app)
+  ws-transport.js    # WebSocket transport (talks to the DO)
+wrangler.toml        # Cloudflare config (DO binding + migration)
+harness/             # Issue tracking + migration notes
 ```
 
 ### Game Flow
@@ -53,38 +52,43 @@ wrangler.toml        # Cloudflare deployment config (mode selection)
 
 ### Running Locally
 ```bash
-node dev-server.js
-# Server runs at http://localhost:12000
+npx wrangler dev
+# Serves the Worker + Durable Object locally via Miniflare
 ```
 
 ### Testing
-Open multiple browser tabs to simulate players. Each tab gets a unique player ID via localStorage.
+Open multiple browser tabs to simulate players; each tab keeps its own
+identity/token in `localStorage`. There is also a scripted end-to-end WebSocket
+test used during the DO migration (see `harness/DURABLE-OBJECTS-MIGRATION.md`).
 
 ### Deploying to Cloudflare
 ```bash
-# Select mode in wrangler.toml (comment/uncomment main line)
 npx wrangler deploy
 ```
 
 ## Key Implementation Details
 
-### Vote Race Condition Fix
-The dev server uses game locking (`withGameLock`) to prevent race conditions when multiple players vote simultaneously.
+### Vote race safety
+No explicit locking is needed: the Durable Object handles one WebSocket message
+at a time behind the input gate, and each `GameActions` call mutates state
+synchronously before any `await`, so concurrent votes can't lose updates.
 
-### State Recovery (WebRTC Mode)
-- Game state has `createdAt` timestamp
-- Clients hold copy of state
-- On host reconnect, oldest timestamp wins
-- Ensures state lineage is preserved
+### Reconnection
+On join the DO issues a per-player `token` bound to the `playerId`. The client
+stores `{playerId, token}` in `localStorage` (`mightymen_id_<CODE>`). Reconnecting
+sends `{type:'hello', playerId, token}`; the DO re-attaches the socket and pushes
+current state. State lives in the DO, so nothing is lost on refresh.
 
-### Frontend Mode Detection
-On page load, frontend calls `/api/mode` to detect KV vs WebRTC mode and uses appropriate transport layer.
+### Per-player views
+Clients never receive raw game state. The DO computes `getPublicGameState` and
+`getPlayerKnowledge` per player and sends only that.
 
 ## Common Issues
 
 1. **Vote button doesn't work**: Check that `game.votes[playerId] !== undefined` (not `!!value`)
 2. **Phase not rendering**: Ensure all phases listed in `updateUI()` switch statement
-3. **Selection cleared on poll**: Use persistent state object outside render function
+3. **State missing after connect**: the transport resolves `createGame/joinGame`
+   only after the first `state` message arrives — check the WebSocket opened.
 
 ## GitHub Repository
 https://github.com/JEdward7777/mighty-men-of-david

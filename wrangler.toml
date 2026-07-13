@@ -1,26 +1,27 @@
 # ============================================================
 # Mighty Men of David - Cloudflare Workers Configuration
 # ============================================================
-# Two deployment modes available:
-#   1. KV Mode (default) - Uses Cloudflare KV for all game state
-#   2. WebRTC Mode - Uses WebRTC for game communication, KV only for signaling
-#
-# To switch modes, comment/uncomment the appropriate "main" line below
+# Server-authoritative architecture:
+#   - One `GameRoom` Durable Object per game code holds the game state.
+#   - Players connect over WebSocket; each gets a per-player filtered view.
 # ============================================================
 
 name = "mighty-men-game"
-compatibility_date = "2024-01-01"
-
-# WebRTC Mode - Peer-to-peer game state, KV only for signaling
-main = "src/worker-webrtc.js"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
 
 [vars]
-GAME_EXPIRY_SECONDS = "7200"  # 2 hours
+GAME_EXPIRY_SECONDS = "7200"  # 2 hours (informational; DO uses its own alarm)
 
-[[kv_namespaces]]
-binding = "GAMES"
-id = "cee84f043e2142f7bcb5876328d59899"
-preview_id = "cee84f043e2142f7bcb5876328d59899"
+# Durable Object that hosts each game room.
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+# SQLite-backed Durable Object storage.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
 
 [assets]
 directory = "./public"

@@ -66,25 +66,17 @@ Create a game, share the code with friends, and play together!
 # Install dependencies
 npm install
 
-# Run local development server
-node dev-server.js
+# Run the Worker + Durable Object locally (Miniflare)
+npx wrangler dev
 ```
 
-The game will be available at `http://localhost:12000`
+Open the printed `http://localhost:####` URL. Simulate players with multiple
+browser tabs.
 
 ### Deploy to CloudFlare Workers
 
-1. Create a KV namespace in CloudFlare dashboard
-2. Update `wrangler.toml` with your KV namespace IDs:
-
-```toml
-[[kv_namespaces]]
-binding = "GAMES"
-id = "your-kv-namespace-id"
-preview_id = "your-preview-kv-namespace-id"
-```
-
-3. Deploy:
+Durable Objects require no manual namespace setup — the binding and migration are
+declared in `wrangler.toml`. Just deploy:
 
 ```bash
 npm run deploy
@@ -95,11 +87,13 @@ npm run deploy
 ```
 mighty-men-game/
 ├── public/
-│   └── index.html      # Frontend (single-page app)
+│   ├── index.html      # Frontend (single-page app)
+│   └── ws-transport.js # WebSocket transport (talks to the Durable Object)
 ├── src/
-│   └── worker.js       # CloudFlare Worker backend
-├── dev-server.js       # Local development server
-├── wrangler.toml       # CloudFlare configuration
+│   ├── worker.js       # Worker entry + GameRoom Durable Object
+│   └── game-logic.js   # Shared game rules
+├── harness/            # Issue tracking + migration notes
+├── wrangler.toml       # CloudFlare configuration (DO binding + migration)
 └── package.json
 ```
 
@@ -108,7 +102,7 @@ mighty-men-game/
 - **Ancient/Biblical aesthetic** with parchment textures and classic typography
 - **QR code** for easy game joining
 - **Hold-to-reveal** role cards for security
-- **Real-time updates** via polling
+- **Real-time updates** via WebSocket (server-authoritative Durable Object)
 - **Sound alerts** when it's your turn to act
 - **Session persistence** - rejoin if you close your browser
 - **Mobile-optimized** touch-friendly interface
@@ -121,20 +115,20 @@ Environment variables in `wrangler.toml`:
 |----------|-------------|---------|
 | `GAME_EXPIRY_SECONDS` | How long games persist | 7200 (2 hours) |
 
-## 📝 API Endpoints
+## 📝 API
+
+The HTTP surface is tiny — everything else happens over the WebSocket.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/create` | POST | Create new game |
-| `/api/join` | POST | Join existing game |
-| `/api/rejoin` | POST | Rejoin with saved session |
-| `/api/state` | POST | Get current game state |
-| `/api/knowledge` | POST | Get player's role and knowledge |
-| `/api/start` | POST | Start the game (host only) |
-| `/api/propose` | POST | Propose quest team |
-| `/api/vote` | POST | Vote on proposed team |
-| `/api/quest` | POST | Submit quest success/fail |
-| `/api/assassinate` | POST | Saul's assassination attempt |
+| `/api/create` | POST | Create a new game; returns `{ gameCode, playerId, token }` |
+| `/api/ws?code=XXXX` | WS | WebSocket into the game's Durable Object |
+
+Over the WebSocket, the client sends `{type:'hello', ...}` to join/reconnect and
+`{type:'action', action, data}` to play (`start`, `propose`, `vote`,
+`continueFromVote`, `questVote`, `continueFromQuest`, `assassinate`). The server
+sends `{type:'identity'}`, per-player `{type:'state', state, knowledge}`, and
+`{type:'error'}`.
 
 ## 🎯 Role Distribution
 

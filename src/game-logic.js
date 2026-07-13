@@ -574,34 +574,8 @@ const GameActions = {
   }
 };
 
-// ============ Exports ============
+// ============ Exports (ES module — imported by the Durable Object) ============
 
-// For ES modules (Cloudflare Workers)
-// export { ... }
-
-// For CommonJS (Node.js dev server)
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    GAME_PHASES,
-    ROLES,
-    GOOD_ROLES,
-    EVIL_ROLES,
-    QUEST_SIZES,
-    QUEST_FAIL_REQUIREMENTS,
-    TEAM_COMPOSITION,
-    generateCode,
-    generatePlayerId,
-    shuffleArray,
-    isEvil,
-    assignRoles,
-    getPlayerKnowledge,
-    createGame,
-    getPublicGameState,
-    GameActions
-  };
-}
-
-// For ES modules
 export {
   GAME_PHASES,
   ROLES,

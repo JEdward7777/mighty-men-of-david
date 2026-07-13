@@ -1104,10 +1104,8 @@
   <!-- QR Code Library - using qrcodejs which works better in browsers -->
   <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
   
-  <!-- Game logic for WebRTC mode (client-side state management) -->
-  <script src="/game-logic-client.js"></script>
-  <!-- WebRTC transport layer -->
-  <script src="/webrtc-transport.js"></script>
+  <!-- WebSocket transport layer (Durable Object backend) -->
+  <script src="/ws-transport.js"></script>
   
   <script>
     // Game state
@@ -1222,18 +1220,14 @@
       }
     }
     
-    // Initialize WebRTC transport
+    // Initialize the game transport
     function initWebRTC() {
-      if (typeof WebRTCTransport === 'undefined') {
-        console.error('WebRTCTransport not loaded');
+      if (typeof GameTransport === 'undefined') {
+        console.error('GameTransport not loaded');
         return false;
       }
-      if (typeof GameLogic === 'undefined') {
-        console.error('GameLogic not loaded');
-        return false;
-      }
-      
-      webrtcTransport = new WebRTCTransport();
+
+      webrtcTransport = new GameTransport();
       webrtcTransport.onStateUpdate = handleWebRTCStateUpdate;
       webrtcTransport.onConnectionChange = handleWebRTCConnectionChange;
       webrtcTransport.onError = (msg) => alert('Error: ' + msg);
@@ -1308,20 +1302,6 @@
         // Audio not supported
       }
     }
-    
-    // Generate QR code
-    function generateQRCode(url) {
-      const canvas = document.getElementById('qr-canvas');
-      QRCode.toCanvas(canvas, url, {
-        width: 180,
-        margin: 2,
-        color: {
-          dark: '#2c1810',
-          light: '#f4e4bc'
-        }
-      });
-    }
-    
     // Create game
     async function createGame() {
       const name = document.getElementById('host-name').value.trim();
