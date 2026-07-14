@@ -1,12 +1,11 @@
 // WebSocket transport for Mighty Men of David.
 //
-// Replaces the old WebRTC peer-to-peer layer. All players connect to a single
-// server-authoritative Durable Object (see src/worker.js) which sends each player
-// a filtered view of the game. This works across any network — no NAT traversal.
+// All players connect to a single server-authoritative Durable Object (see
+// src/worker.js) which sends each player a filtered view of the game. This works
+// across any network — no NAT traversal, no peer connections.
 //
-// It intentionally exposes the same public surface the UI already used
-// (createGame / joinGame / rejoinGame / doAction / getPublicState / getKnowledge /
-// onStateUpdate / onConnectionChange / onError) so index.html needs almost no change.
+// Public surface used by the UI: createGame / joinGame / rejoinGame / doAction /
+// getPublicState / getKnowledge / onStateUpdate / onConnectionChange / onError.
 
 function dbg(category, ...args) {
   const ts = new Date().toISOString().substr(11, 12);
@@ -286,7 +285,5 @@ class GameTransport {
   }
 }
 
-// The UI still instantiates `WebRTCTransport`; keep that name as an alias so the
-// rest of index.html is untouched.
+// Exposed for index.html, which does `new GameTransport()`.
 window.GameTransport = GameTransport;
-window.WebRTCTransport = GameTransport;

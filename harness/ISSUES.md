@@ -85,6 +85,15 @@ token. A player who knows the host's display name can claim host authority. Like
 stakes for a party game, but worth noting; the DO design should issue a per-session
 token.
 
+### B6 🔴 Game-over screen never showed (`stopPolling` crash) — RESOLVED
+**File:** `public/index.html` (`updateUI`, `game_over` case)
+
+Found during the post-migration cleanup pass, not the original audit. The
+`game_over` branch called `stopPolling()` — a function from the deleted KV-polling
+transport that no longer exists. The `ReferenceError` aborted `updateUI()` before
+`showGameOver()` ran, so **no player ever saw the end-of-game results screen**.
+Removed the call; verified with a jsdom test that drives the client to `game_over`.
+
 ### B5 ⚪ Misleading heartbeat log — RESOLVED
 **File:** `public/webrtc-transport.js:784-785`
 
@@ -141,6 +150,7 @@ server-authoritative Durable Object. See `DURABLE-OBJECTS-MIGRATION.md`.
 | A2 | Authoritative state lives in the `GameRoom` DO, not the host's browser. Host can refresh/drop and the game continues; state-recovery code deleted. |
 | A3 | The DO sends each socket only `getPublicGameState`/`getPlayerKnowledge` for *that* player. Raw roles never leave the server (verified by smoke test — other players' `role` is `undefined` pre-game-over). |
 | B1, B2, B5 | The buggy `webrtc-transport.js` was deleted. The new `ws-transport.js` uses a single guarded reconnect loop (`_reconnecting` flag) with real backoff and no per-connect interval leak. |
+| B6 | Removed the dead `stopPolling()` call in `updateUI`'s `game_over` branch; the results screen renders again (verified with a jsdom DOM test). |
 | B3 | Worker generates a code and the DO refuses a code it already holds, so the Worker retries — codes are collision-free. |
 | B4 | Reconnection requires `playerId + token` (random per player, held in the DO, never broadcast). Knowing a display name no longer grants a seat or host rights. |
 | C1 | `README.md`, `AGENTS.md`, `package.json` updated to the WebSocket/DO architecture. |

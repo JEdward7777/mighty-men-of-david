@@ -1,6 +1,6 @@
 // Mighty Men - Shared Game Logic
 // This module contains all game rules, state management, and validation
-// It is storage-agnostic and used by both KV and WebRTC implementations
+// It is storage-agnostic; the GameRoom Durable Object runs it server-side.
 
 const GAME_PHASES = {
   LOBBY: 'lobby',
