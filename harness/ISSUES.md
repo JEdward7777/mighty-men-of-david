@@ -92,6 +92,16 @@ token.
 > social game where you already trust the other players. Token is still the
 > same-browser fast path.
 
+### B9 🟠 Leaving a game crashed on a late socket message — RESOLVED
+**File:** `public/index.html` (`leaveGame`, `handleStateUpdate`)
+
+Found while adding the "Leave game" button. `leaveGame` set the global `transport`
+to `null`, but a `state` message already in flight from the old socket still fired
+`handleStateUpdate`, which dereferenced `transport` → `TypeError: ... reading
+'getPublicState'`. Fixed by detaching the transport's callbacks *before* destroying
+it (so a game you left can't drive the UI) plus a null guard in `handleStateUpdate`.
+Part of the leave/`?join=`-precedence change; covered by `leave-test.mjs`.
+
 ### B8 🔴 Refresh dropped you from the game; rejoin lost your identity — RESOLVED
 **File:** `public/index.html` (session storage, `handleStateUpdate`, load handler)
 
