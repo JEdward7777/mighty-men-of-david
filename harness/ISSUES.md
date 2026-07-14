@@ -85,6 +85,19 @@ token. A player who knows the host's display name can claim host authority. Like
 stakes for a party game, but worth noting; the DO design should issue a per-session
 token.
 
+### B7 🔴 Second tab in the same browser couldn't join — RESOLVED
+**File:** `public/ws-transport.js` (identity persistence)
+
+Reported after deploy: creating a game then joining from a second tab (or a second
+incognito tab) didn't add the second player. Tabs in one browser share
+`localStorage`, and the transport saved each player's reconnect token under a key
+of the **game code only**. So the second tab's `rejoinGame()` found the first
+player's token and silently reconnected *as that player* instead of joining fresh —
+the new name never reached the server. Fixed by keying identity on **code + name**
+(`_identityKey(code, name)`). Verified with a jsdom test that runs three transports
+against `wrangler dev` in one shared `localStorage` (three distinct players; nobody
+hijacks the host; reconnect still maps back to the same id).
+
 ### B6 🔴 Game-over screen never showed (`stopPolling` crash) — RESOLVED
 **File:** `public/index.html` (`updateUI`, `game_over` case)
 

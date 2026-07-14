@@ -15,6 +15,7 @@ function dbg(category, ...args) {
 class GameTransport {
   constructor() {
     this.gameCode = null;
+    this.playerName = null;
     this.playerId = null;
     this.token = null;
     this.isHost = false;
@@ -40,25 +41,30 @@ class GameTransport {
     this._gotFirstState = false;
   }
 
-  // ============ Identity persistence (per game code) ============
+  // ============ Identity persistence (per game code + name) ============
+  //
+  // Keyed by code AND name because tabs in the same browser share localStorage.
+  // If it were keyed by code alone, a second tab joining under a different name
+  // would find the first player's token and reconnect *as that player* instead
+  // of joining fresh.
 
-  _identityKey(code) {
-    return `mightymen_id_${code.toUpperCase()}`;
+  _identityKey(code, name) {
+    return `mightymen_id_${code.toUpperCase()}_${encodeURIComponent((name || '').toLowerCase())}`;
   }
 
   _saveIdentity() {
-    if (!this.gameCode || !this.playerId || !this.token) return;
+    if (!this.gameCode || !this.playerName || !this.playerId || !this.token) return;
     try {
       localStorage.setItem(
-        this._identityKey(this.gameCode),
+        this._identityKey(this.gameCode, this.playerName),
         JSON.stringify({ playerId: this.playerId, token: this.token })
       );
     } catch { /* storage unavailable */ }
   }
 
-  _loadIdentity(code) {
+  _loadIdentity(code, name) {
     try {
-      const raw = localStorage.getItem(this._identityKey(code));
+      const raw = localStorage.getItem(this._identityKey(code, name));
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -77,6 +83,7 @@ class GameTransport {
     if (result.error) throw new Error(result.error);
 
     this.gameCode = result.gameCode;
+    this.playerName = hostName;
     this.playerId = result.playerId;
     this.token = result.token;
     this.isHost = true;
@@ -88,18 +95,20 @@ class GameTransport {
 
   async joinGame(gameCode, playerName) {
     this.gameCode = gameCode.toUpperCase();
+    this.playerName = playerName;
     await this._connect({ name: playerName });
     return { gameCode: this.gameCode, playerId: this.playerId };
   }
 
   async rejoinGame(gameCode, playerName) {
     const code = gameCode.toUpperCase();
-    const identity = this._loadIdentity(code);
-    // No saved credentials → let the UI fall back to a fresh join.
+    const identity = this._loadIdentity(code, playerName);
+    // No saved credentials for this name → let the UI fall back to a fresh join.
     if (!identity) {
       throw new Error('No player with that name found in this game');
     }
     this.gameCode = code;
+    this.playerName = playerName;
     this.playerId = identity.playerId;
     this.token = identity.token;
     await this._connect({ playerId: identity.playerId, token: identity.token });
