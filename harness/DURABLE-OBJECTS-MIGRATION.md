@@ -65,12 +65,18 @@ replacing the old KV TTL.
 
 ## Behavioural notes / trade-offs
 
-- **Reconnect now needs the token.** A player returning on the *same* browser
-  reconnects seamlessly (token in `localStorage`). A player on a brand-new device
-  cannot silently reclaim a seat in an in-progress game — this is intended and
-  closes the host-hijack hole (B4). Name-based reclaim is gone.
-- The client keeps its own identity record per game code in `localStorage`
-  (`mightymen_id_<CODE>`), independent of the UI's existing `mightymen_game` session.
+- **Reconnect: token fast-path + name reclaim.** A player returning on the *same*
+  browser reconnects via a saved token (no seat change). From **any other browser
+  or device**, game **code + name** is enough to reclaim the seat — even mid-game —
+  because a device dying / storage being wiped should never lock you out of your own
+  game. Reclaim issues a fresh token so the new device becomes the live one. This is
+  a deliberate reversal of the original token-only rule (see B4): in an in-person
+  social game you already have to trust the other players, so avoiding an interrupted
+  game outweighs the small risk of a co-player impersonating you. A brand-new name
+  still can't join once the game has started.
+- The client keeps its own token per game code + name in `localStorage`
+  (`mightymen_id_<CODE>_<name>`); the per-tab session lives in `sessionStorage`
+  (`mightymen_game`) so tabs don't clobber each other and refresh auto-reconnects.
 
 ## Status
 

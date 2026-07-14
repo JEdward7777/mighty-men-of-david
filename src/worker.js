@@ -137,29 +137,47 @@ export class GameRoom extends DurableObject {
       return;
     }
 
-    let { playerId, token } = msg;
+    let playerId = null;
+    let token = null;
 
-    if (playerId && token && this.secrets[playerId] === token) {
-      // Known player reconnecting.
+    const hasValidToken =
+      msg.playerId && msg.token && this.secrets[msg.playerId] === msg.token &&
+      this.game.players.some((p) => p.id === msg.playerId);
+
+    if (hasValidToken) {
+      // Fast path: reconnect by token (same browser), no token rotation.
+      playerId = msg.playerId;
+      token = msg.token;
       const player = this.game.players.find((p) => p.id === playerId);
-      if (!player) {
-        this.send(ws, { type: 'error', message: 'Player not found' });
-        ws.close(1000, 'Player not found');
-        return;
-      }
       player.connected = true;
       player.lastSeen = Date.now();
     } else if (msg.name) {
-      // New player joining (GameActions.join enforces lobby-only + name rules).
-      try {
-        const res = GameActions.join(this.game, msg.name);
-        playerId = res.playerId;
+      const existing = this.game.players.find(
+        (p) => p.name.toLowerCase() === msg.name.toLowerCase()
+      );
+      if (existing) {
+        // Reclaim an existing seat with just game code + name — works from ANY
+        // device/browser, even mid-game, and even if the saved token was lost.
+        // We trust the name here by design: not being locked out of your own
+        // game matters more than preventing a co-player from impersonating you.
+        // A fresh token is issued so the new device becomes the live one.
+        playerId = existing.id;
         token = crypto.randomUUID();
         this.secrets[playerId] = token;
-      } catch (e) {
-        this.send(ws, { type: 'error', message: e.message });
-        ws.close(1000, 'Join rejected');
-        return;
+        existing.connected = true;
+        existing.lastSeen = Date.now();
+      } else {
+        // New name → join (GameActions.join enforces lobby-only + full/dup rules).
+        try {
+          const res = GameActions.join(this.game, msg.name);
+          playerId = res.playerId;
+          token = crypto.randomUUID();
+          this.secrets[playerId] = token;
+        } catch (e) {
+          this.send(ws, { type: 'error', message: e.message });
+          ws.close(1000, 'Join rejected');
+          return;
+        }
       }
     } else {
       this.send(ws, { type: 'error', message: 'Unknown player' });

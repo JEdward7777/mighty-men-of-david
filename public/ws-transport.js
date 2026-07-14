@@ -102,16 +102,20 @@ class GameTransport {
 
   async rejoinGame(gameCode, playerName) {
     const code = gameCode.toUpperCase();
-    const identity = this._loadIdentity(code, playerName);
-    // No saved credentials for this name → let the UI fall back to a fresh join.
-    if (!identity) {
-      throw new Error('No player with that name found in this game');
-    }
     this.gameCode = code;
     this.playerName = playerName;
-    this.playerId = identity.playerId;
-    this.token = identity.token;
-    await this._connect({ playerId: identity.playerId, token: identity.token });
+    // Always send the name so the server can reclaim the seat by name from any
+    // browser (or after the saved token was lost). Include the saved token when
+    // we have one so a same-browser reconnect keeps its id without rotating it.
+    const hello = { name: playerName };
+    const identity = this._loadIdentity(code, playerName);
+    if (identity) {
+      this.playerId = identity.playerId;
+      this.token = identity.token;
+      hello.playerId = identity.playerId;
+      hello.token = identity.token;
+    }
+    await this._connect(hello);
     return { gameCode: this.gameCode, playerId: this.playerId, isHost: this.isHost };
   }
 

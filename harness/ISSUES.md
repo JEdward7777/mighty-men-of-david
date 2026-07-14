@@ -85,6 +85,13 @@ token. A player who knows the host's display name can claim host authority. Like
 stakes for a party game, but worth noting; the DO design should issue a per-session
 token.
 
+> **Update (2026-07-14):** the token requirement was *intentionally relaxed* after
+> deploy. Game **code + name** now reclaims a seat from any device, even mid-game,
+> so a dead battery / wiped storage can't lock a player out of their own game. This
+> knowingly re-accepts the "impersonate by name" risk — acceptable in an in-person
+> social game where you already trust the other players. Token is still the
+> same-browser fast path.
+
 ### B8 🔴 Refresh dropped you from the game; rejoin lost your identity — RESOLVED
 **File:** `public/index.html` (session storage, `handleStateUpdate`, load handler)
 

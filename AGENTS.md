@@ -74,10 +74,16 @@ at a time behind the input gate, and each `GameActions` call mutates state
 synchronously before any `await`, so concurrent votes can't lose updates.
 
 ### Reconnection
-On join the DO issues a per-player `token` bound to the `playerId`. The client
-stores `{playerId, token}` in `localStorage` (`mightymen_id_<CODE>`). Reconnecting
-sends `{type:'hello', playerId, token}`; the DO re-attaches the socket and pushes
-current state. State lives in the DO, so nothing is lost on refresh.
+On join the DO issues a per-player `token` bound to the `playerId`; the client
+stores it in `localStorage` keyed by `code + name` (`mightymen_id_<CODE>_<name>`),
+and keeps a per-tab session in `sessionStorage` so a refresh auto-reconnects and
+tabs don't clobber each other. `hello` carries `{name, playerId?, token?}`:
+- valid `playerId + token` → reconnect that seat (same browser, no token change);
+- otherwise, if `name` matches an existing player → **reclaim that seat from any
+  device/browser, even mid-game** (a fresh token is issued). Game code + name is
+  intentionally enough to get back in — see the trade-off note in the migration doc;
+- otherwise a new `name` joins (lobby only).
+State lives in the DO, so nothing is lost on refresh or device switch.
 
 ### Per-player views
 Clients never receive raw game state. The DO computes `getPublicGameState` and

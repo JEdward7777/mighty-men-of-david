@@ -1314,61 +1314,39 @@
       }
     }
     
-    // Join game - also handles rejoin if name matches existing player/host
+    // Join game. Game code + name is all it takes: the server adds you as a new
+    // player if the name is new (in the lobby), or reconnects you to your existing
+    // seat if the name is already in the game — so this same button works to join,
+    // to rejoin from a fresh browser, or to move your game to another device.
     async function joinGame() {
       const code = document.getElementById('join-code').value.trim().toUpperCase();
       const name = document.getElementById('join-name').value.trim();
-      
+
       if (!code || !name) {
         alert('Please enter game code and your name');
         return;
       }
-      
+
       try {
         if (!initTransport()) {
           alert('Failed to initialize transport');
           return;
         }
-        
+
         showReconnectingNotice(); // Show connecting message
-        
-        // First check if this name already exists in the game (rejoin scenario)
-        // This handles both host reconnection and player reconnection
-        console.log('[UI] Checking if this is a rejoin...');
-        const result = await transport.rejoinGame(code, name);
-        
+
+        const result = await transport.joinGame(code, name);
         gameCode = result.gameCode;
         playerId = result.playerId;
         saveSession(gameCode, playerId, name);
-        
+
         hideReconnectingNotice();
-        
-        // State will arrive via the transport's onStateUpdate callback
+
+        // State arrives via the transport's onStateUpdate callback.
         showLobby();
-        
-        console.log(`Joined/Rejoined game as ${result.isHost ? 'HOST' : 'player'}`);
       } catch (error) {
-        // If rejoin fails (name not found), try joining as new player
-        if (error.message.includes('No player with that name')) {
-          console.log('[UI] Not a rejoin, joining as new player');
-          try {
-            const result = await transport.joinGame(code, name);
-            gameCode = result.gameCode;
-            playerId = result.playerId;
-            saveSession(gameCode, playerId, name);
-            
-            hideReconnectingNotice();
-            showLobby();
-            
-            console.log('Joined game as new player');
-          } catch (joinError) {
-            hideReconnectingNotice();
-            alert(joinError.message);
-          }
-        } else {
-          hideReconnectingNotice();
-          alert(error.message);
-        }
+        hideReconnectingNotice();
+        alert(error.message);
       }
     }
     
