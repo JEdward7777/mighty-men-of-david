@@ -85,6 +85,24 @@ token. A player who knows the host's display name can claim host authority. Like
 stakes for a party game, but worth noting; the DO design should issue a per-session
 token.
 
+### B8 🔴 Refresh dropped you from the game; rejoin lost your identity — RESOLVED
+**File:** `public/index.html` (session storage, `handleStateUpdate`, load handler)
+
+Reported in `found_problems.txt`. Refreshing returned you to the home screen, and
+the manual "Rejoin" put you back but with no "You" badge and no ability to act; a
+host who refreshed was no longer host. Three causes:
+1. The rejoin **session** was in `localStorage` (shared across tabs), so tabs
+   clobbered each other's session and "Rejoin" used whichever was saved last.
+   Moved to per-tab `sessionStorage` (survives refresh, isn't shared).
+2. **No auto-reconnect** on load — moved to reconnecting this tab on page load.
+3. The "You" badge / action gating used a global `playerId` assigned *after* the
+   first render, so it stayed unset on reconnect. `handleStateUpdate` now takes
+   `playerId`/`gameCode` from the server's per-connection `state.myId`/`state.code`.
+
+Verified with a jsdom test that loads the real page against `wrangler dev` and
+simulates refreshes by carrying a tab's storage across page loads (host + player
+"You" badges, auto-reconnect to lobby, host stays host, no duplicate players).
+
 ### B7 🔴 Second tab in the same browser couldn't join — RESOLVED
 **File:** `public/ws-transport.js` (identity persistence)
 

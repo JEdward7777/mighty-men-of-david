@@ -1162,6 +1162,14 @@
     function handleStateUpdate() {
       gameState = transport.getPublicState();
       playerKnowledge = transport.getKnowledge();
+      // Trust the server for our own identity. myId is computed per-connection,
+      // so this stays correct through joins, rejoins and reconnects — and it
+      // avoids a race where the first render happens before the create/join/
+      // rejoin handler has assigned the global playerId.
+      if (gameState) {
+        if (gameState.myId) playerId = gameState.myId;
+        if (gameState.code) gameCode = gameState.code;
+      }
       updateUI();
     }
 
@@ -1215,21 +1223,24 @@
       }
     }
     
-    // Local storage for rejoin
+    // Session for rejoin. Stored in sessionStorage (NOT localStorage) so it is
+    // per-tab: multiple tabs in one browser are different players and must not
+    // share/clobber each other's session. sessionStorage survives a refresh,
+    // which is exactly what auto-reconnect needs.
     function saveSession(code, id, name) {
-      localStorage.setItem('mightymen_game', JSON.stringify({ code, playerId: id, name }));
+      sessionStorage.setItem('mightymen_game', JSON.stringify({ code, playerId: id, name }));
     }
-    
+
     function loadSession() {
       try {
-        return JSON.parse(localStorage.getItem('mightymen_game'));
+        return JSON.parse(sessionStorage.getItem('mightymen_game'));
       } catch {
         return null;
       }
     }
-    
+
     function clearSession() {
-      localStorage.removeItem('mightymen_game');
+      sessionStorage.removeItem('mightymen_game');
     }
     
     // Check for existing session on load
@@ -1361,34 +1372,37 @@
       }
     }
     
-    // Rejoin game (after page refresh)
-    async function rejoinGame() {
+    // Rejoin game (after page refresh). Called automatically on load with
+    // auto=true (silent on failure) and by the Rejoin button with auto=false.
+    async function rejoinGame(auto = false) {
       const session = loadSession();
       if (!session || !session.name) return;
-      
+
       try {
         if (!initTransport()) {
-          alert('Failed to initialize transport');
+          if (!auto) alert('Failed to initialize transport');
           return;
         }
-        
+
         showReconnectingNotice();
-        
+
         const result = await transport.rejoinGame(session.code, session.name);
         gameCode = result.gameCode;
         playerId = result.playerId;
-        
+        saveSession(gameCode, playerId, session.name); // keep this tab's session fresh
+
         hideReconnectingNotice();
-        
-        // State will arrive via the transport's onStateUpdate callback
+
+        // State arrives via the transport's onStateUpdate callback.
         showLobby();
-        
+
         console.log('Rejoined game');
       } catch (error) {
         hideReconnectingNotice();
-        alert('Could not rejoin game: ' + error.message);
+        if (!auto) alert('Could not rejoin game: ' + error.message);
         clearSession();
-        document.getElementById('rejoin-section').classList.add('hidden');
+        const section = document.getElementById('rejoin-section');
+        if (section) section.classList.add('hidden');
       }
     }
     
@@ -2109,16 +2123,13 @@
         document.getElementById('join-code').value = joinCode;
       }
       
-      // Check for existing session
-      checkExistingSession();
-      
       // Setup role reveal
       setupRoleReveal();
-      
+
       // Event listeners
       document.getElementById('btn-create').addEventListener('click', createGame);
       document.getElementById('btn-join').addEventListener('click', joinGame);
-      document.getElementById('btn-rejoin').addEventListener('click', rejoinGame);
+      document.getElementById('btn-rejoin').addEventListener('click', () => rejoinGame(false));
       document.getElementById('btn-start').addEventListener('click', startGame);
       document.getElementById('btn-new-game').addEventListener('click', () => {
         clearSession();
@@ -2132,6 +2143,15 @@
       document.getElementById('join-name').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') joinGame();
       });
+
+      // If this tab already has a session (e.g. after a refresh), reconnect
+      // automatically instead of dropping the player back on the home screen.
+      const session = loadSession();
+      if (session && session.name) {
+        rejoinGame(true);
+      } else {
+        checkExistingSession();
+      }
     });
   </script>
 </body>
