@@ -16,9 +16,11 @@ see `harness/ISSUES.md` A1. That code was removed; history is in `harness/`.)
   players' browsers.
 - The DO processes one message at a time behind the input gate, so simultaneous
   votes cannot race (no explicit locking needed).
-- Reconnection uses a per-player `token` (issued by the DO, stored in
-  `localStorage`), so state survives a host/player refresh and seats can't be
-  hijacked by name.
+- Reconnection: a per-player `token` (in `localStorage`) is the same-browser fast
+  path; otherwise game code + name reclaims the seat from any device, even mid-game.
+- Lobby management: a player can `leave` (removed from the roster in the lobby;
+  mid-game they just disconnect), and the host can `kick` another player in the
+  lobby (removed player is notified and dropped to the home screen).
 
 ### File Structure
 ```

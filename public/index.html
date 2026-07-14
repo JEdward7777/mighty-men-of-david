@@ -1196,6 +1196,12 @@
         case 'reconnecting':
           showReconnectingNotice();
           break;
+        case 'removed':
+          // The host kicked us from the game.
+          hideReconnectingNotice();
+          exitToHome();
+          alert(event.message || 'You were removed from the game.');
+          break;
       }
     }
 
@@ -1256,21 +1262,20 @@
       sessionStorage.removeItem('mightymen_game');
     }
 
-    // Intentionally leave the current game and return to the home screen so this
-    // tab is free to join a different game. This disconnects the socket and drops
-    // the tab's session; you remain in the old game's roster as "disconnected"
-    // (harmless) and could rejoin later with the same code + name.
-    function leaveGame() {
-      if (!confirm('Leave this game?')) return;
+    // Tear down the connection and return to the home screen so this tab is free
+    // to join a different game.
+    function exitToHome() {
       clearSession();
       if (transport) {
         // Detach callbacks first so a late message from the game we're leaving
         // can't drive the UI (or touch the now-null transport) after we're out.
-        transport.onStateUpdate = null;
-        transport.onConnectionChange = null;
-        transport.onError = null;
-        transport.destroy();
+        const t = transport;
+        t.onStateUpdate = null;
+        t.onConnectionChange = null;
+        t.onError = null;
         transport = null;
+        // Defer the close briefly so any final message (e.g. 'leave') flushes.
+        setTimeout(() => t.destroy(), 200);
       }
       gameState = null;
       playerKnowledge = null;
@@ -1279,6 +1284,18 @@
       document.getElementById('game-code-display').style.display = 'none';
       document.getElementById('rejoin-section').classList.add('hidden');
       showScreen('screen-home');
+    }
+
+    // Intentionally leave the current game. In the lobby a non-host also drops out
+    // of the roster (so the player count stays accurate); mid-game you stay in the
+    // roster as "disconnected" (the roster is load-bearing once roles are dealt)
+    // and can rejoin later with the same code + name.
+    function leaveGame() {
+      if (!confirm('Leave this game?')) return;
+      if (transport && gameState && gameState.phase === 'lobby' && !gameState.isHost) {
+        transport.doAction('leave');
+      }
+      exitToHome();
     }
 
     // Check for existing session on load
@@ -1477,9 +1494,23 @@
           <span class="player-name">${escapeHtml(p.name)}</span>
           ${p.isHost ? '<span class="player-badge host">Host</span>' : ''}
           ${p.id === playerId ? '<span class="player-badge you">You</span>' : ''}
+          ${state.isHost && !p.isHost
+            ? `<button class="kick-btn" data-id="${p.id}" style="margin-left:8px;background:rgba(192,57,43,0.85);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;">Remove</button>`
+            : ''}
         </li>
       `).join('');
-      
+
+      // Wire host "Remove" buttons (lobby only).
+      playerList.querySelectorAll('.kick-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const target = state.players.find(pp => pp.id === id);
+          if (confirm(`Remove ${target ? target.name : 'this player'} from the game?`)) {
+            doAction('kick', { targetId: id });
+          }
+        });
+      });
+
       const hostControls = document.getElementById('host-controls');
       const waitingMessage = document.getElementById('waiting-message');
       

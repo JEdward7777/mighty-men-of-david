@@ -317,12 +317,40 @@ const GameActions = {
     if (!player) {
       throw new Error('Player not found in this game');
     }
-    
+
     player.connected = true;
     player.lastSeen = Date.now();
     this._incrementVersion(game);
-    
+
     return { playerName: player.name };
+  },
+
+  // Leave the game (lobby only — mid-game the roster is load-bearing).
+  leave(game, playerId) {
+    if (game.phase !== GAME_PHASES.LOBBY) {
+      throw new Error('Can only leave during the lobby');
+    }
+    const idx = game.players.findIndex(p => p.id === playerId);
+    if (idx === -1) throw new Error('Player not found');
+    if (game.players[idx].isHost) throw new Error('The host cannot leave the game');
+    game.players.splice(idx, 1);
+    this._incrementVersion(game);
+    return { removedId: playerId };
+  },
+
+  // Host removes another player (lobby only).
+  kick(game, playerId, targetId) {
+    if (game.phase !== GAME_PHASES.LOBBY) {
+      throw new Error('Can only remove players during the lobby');
+    }
+    const host = game.players.find(p => p.id === playerId);
+    if (!host || !host.isHost) throw new Error('Only the host can remove players');
+    const idx = game.players.findIndex(p => p.id === targetId);
+    if (idx === -1) throw new Error('Player not found');
+    if (game.players[idx].isHost) throw new Error('The host cannot be removed');
+    game.players.splice(idx, 1);
+    this._incrementVersion(game);
+    return { removedId: targetId };
   },
   
   // Start the game (host only)

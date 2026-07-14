@@ -225,6 +225,12 @@ class GameTransport {
           this.onError(msg.message);
         }
         break;
+
+      case 'removed':
+        // The host removed us. Don't try to reconnect; let the UI bail out.
+        this._intentionalClose = true;
+        this._emit({ type: 'removed', message: msg.message });
+        break;
     }
   }
 

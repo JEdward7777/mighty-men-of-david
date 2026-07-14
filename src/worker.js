@@ -201,6 +201,8 @@ export class GameRoom extends DurableObject {
   // ---- Game actions ----
   async handleAction(ws, playerId, msg) {
     const data = msg.data || {};
+    let removedId = null;      // set when a player leaves/is kicked
+    let removedByHost = false; // true only for a kick (so we notify the removed one)
     try {
       switch (msg.action) {
         case 'start':
@@ -224,6 +226,13 @@ export class GameRoom extends DurableObject {
         case 'assassinate':
           GameActions.assassinate(this.game, playerId, data.targetId);
           break;
+        case 'leave':
+          removedId = GameActions.leave(this.game, playerId).removedId;
+          break;
+        case 'kick':
+          removedId = GameActions.kick(this.game, playerId, data.targetId).removedId;
+          removedByHost = true;
+          break;
         default:
           throw new Error('Unknown action');
       }
@@ -233,6 +242,22 @@ export class GameRoom extends DurableObject {
     }
 
     await this.persist();
+
+    if (removedId) {
+      delete this.secrets[removedId];
+      // Notify + disconnect the removed player's sockets before broadcasting the
+      // updated roster, so they don't briefly render a game they're no longer in.
+      for (const sock of this.ctx.getWebSockets()) {
+        const att = sock.deserializeAttachment();
+        if (att && att.playerId === removedId) {
+          if (removedByHost) {
+            this.send(sock, { type: 'removed', message: 'The host removed you from the game.' });
+          }
+          try { sock.close(1000, 'Removed'); } catch { /* ignore */ }
+        }
+      }
+    }
+
     this.broadcast();
   }
 
