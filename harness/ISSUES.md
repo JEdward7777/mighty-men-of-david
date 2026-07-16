@@ -187,6 +187,127 @@ it's just dead, misleading code.
 
 ---
 
+## Second audit (2026-07-16) — deeper pass over the DO-era code
+
+All items below are **OPEN** and verified against the source (not speculative).
+The D1–D3 cluster is the one that will bite real players on phones.
+
+### D1 🟠 No keepalive → silently dead sockets leave a stale UI — OPEN
+**Files:** `src/worker.js`, `public/ws-transport.js` (no ping/pong anywhere)
+
+There is no heartbeat in either direction and no `visibilitychange` handling. A
+phone that sleeps, switches Wi-Fi→cellular, or sits idle through a long table
+discussion can lose its socket **without a close event ever firing**. The client
+then shows a frozen game and taps do nothing (see D6) until the user refreshes.
+**Fix:** DO: `ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'))`;
+client: send `ping` every ~25s, treat a missed `pong` as dead and reconnect; also
+reconnect on `visibilitychange` when `readyState !== OPEN`.
+
+### D2 🟠 Stale-socket `onclose` race clobbers the new connection — OPEN
+**File:** `public/ws-transport.js:187-191, 237-250`
+
+`ws.onclose → _handleClose()` operates on `this.ws` unconditionally. Sequence:
+connect attempt times out (15s) → `ws.close()` → retry creates a NEW socket and
+assigns `this.ws` → the OLD socket's `onclose` finally fires → `_handleClose`
+sets `this.ws = null` (clobbering the live socket), rejects the *new* attempt's
+pending promise, and can spawn a second parallel reconnect loop.
+**Fix:** capture the socket per-closure and bail early: `if (this.ws !== ws) return;`
+in `onclose`/`onmessage`; detach handlers from any socket being replaced.
+
+### D3 🟠 Auto-reconnect hello omits `name` → permanent reconnect loop — OPEN
+**File:** `public/ws-transport.js:266`
+
+`_scheduleReconnect` reconnects with `{ playerId, token }` only. If the token was
+rotated (the seat was reclaimed from another device — aec7dd6's feature), the
+server sees an invalid token and **no name**, answers "Unknown player", and closes.
+The client retries forever with the same stale credentials.
+**Fix:** include `name: this.playerName` in the reconnect hello; the server already
+prefers the token path when valid, so this only changes the failure case.
+
+### D4 🟡 Reclaiming a seat doesn't disconnect the previous device — OPEN
+**File:** `src/worker.js:158-168` (`handleHello` reclaim branch)
+
+The comment says "the new device becomes the live one," but only future
+*reconnects* are affected (token rotated). The old device's already-open socket
+keeps its attachment and can still act on the seat — two devices drive one player
+until the old socket happens to die.
+**Fix:** on name-reclaim, close (or notify with a `superseded` message) any other
+sockets attached to that `playerId`.
+
+### D5 🟡 Player names are not validated server-side — OPEN
+**File:** `src/worker.js` (`handleHello`), `src/game-logic.js` (`join`)
+
+`msg.name` is used raw: no trim, no length cap. `" Bob"` and `"Bob"` are distinct
+players, and a whitespace-padded name breaks later reclaim-by-name matching
+(`toLowerCase()` compare, no trim). A multi-kilobyte name is accepted, persisted,
+and rendered (escaped, but layout-breaking). `/api/create` trims; hello doesn't —
+inconsistent.
+**Fix:** in `handleHello`, `name = (msg.name || '').trim().slice(0, 20)` and reject
+empty; compare names with the same normalization everywhere.
+
+### D6 🟡 Actions sent while disconnected are silently dropped — OPEN
+**File:** `public/ws-transport.js:276-282` (`_send`)
+
+If the socket isn't OPEN, `_send` just logs to the console. A player who taps
+Vote/Success during a blip gets no feedback, nothing is queued, and no reconnect
+is triggered — combined with D1 this looks like "the game ate my vote."
+**Fix:** surface it (onError / reconnecting notice), kick off a reconnect, and
+optionally queue the most recent action to send after resuming.
+
+### D7 🟡 Disconnected players are invisible in the UI — OPEN
+**File:** `public/index.html` (`updateLobby`, `renderQuest`)
+
+The server tracks and broadcasts `connected` per player, but no screen renders it.
+Mid-game the host can't tell that "waiting for the team" really means "Dave's
+phone died." The old WebRTC UI had per-player notices; the WS UI lost them.
+**Fix:** gray out / badge disconnected players in the lobby list and the quest
+progress list.
+
+### D8 🟡 Stale team selection leaks across quests 4→5 and rejected votes — OPEN
+**File:** `public/index.html` (`renderTeamSelection`, `teamSelectionState`)
+
+Selection reset is keyed on **quest size**, but `QUEST_SIZES = [3,4,5,6,6]` —
+quests 4 and 5 are both 6, so the leader of quest 5 starts with quest 4's picks
+pre-selected. Same for a leader who regains leadership after rejections. Also
+`exitToHome` never resets `teamSelectionState`/`assassinationState`, so picks can
+leak into the *next game* in the same tab.
+**Fix:** key the reset on `currentQuest` (and reset both state objects in
+`exitToHome`).
+
+### D9 🟡 A transient failure during auto-rejoin permanently drops the session — OPEN
+**File:** `public/index.html` (`rejoinGame` catch block)
+
+On page load, `rejoinGame(true)`'s catch calls `clearSession()` for *any* error —
+including a network blip or a slow server. The tab then forgets the game entirely
+(user must re-enter code+name via Join).
+**Fix:** only clear the session on definitive rejections ("Game not found" /
+"removed"); otherwise keep it and retry with backoff.
+
+### D10 ⚪ `GAME_EXPIRY_SECONDS` env var is dead — OPEN
+**Files:** `wrangler.toml:14`, `src/worker.js:20`
+
+The worker hardcodes `GAME_EXPIRY_MS = 2h`; the configured var is never read.
+**Fix:** read `env.GAME_EXPIRY_SECONDS` in the DO (it has `env`), or delete the var.
+
+### D11 ⚪ Dead code in the UI — OPEN
+**File:** `public/index.html`
+
+`playAttentionSound()` is defined but never called (README still advertises
+"Sound alerts when it's your turn"); `lastVotes` is declared and never used; a
+failed join/create leaves the orphaned transport instance behind (re-`initTransport`
+just abandons it).
+**Fix:** wire the sound up on turn transitions or remove it; delete `lastVotes`;
+destroy the transport on failed connect.
+
+### D12 ⚪ Docs drift — OPEN
+**Files:** `README.md`, `src/game-logic.js`
+
+README's WebSocket action list omits `leave`/`kick`; the `version` field in the
+game state is vestigial (it existed for WebRTC host-recovery, which is gone).
+**Fix:** update README; consider dropping `version` or documenting it as unused.
+
+---
+
 ## Resolution summary (2026-07-13, Durable Object migration)
 
 All issues above were addressed by replacing the WebRTC P2P transport with a
