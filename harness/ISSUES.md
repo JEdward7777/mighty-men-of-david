@@ -236,15 +236,18 @@ reconnect succeeds after a token rotation with the same seat and a fresh token;
 roster coherent afterwards. Full regression suite (8 suites, 100+ assertions)
 green.
 
-### D4 🟡 Reclaiming a seat doesn't disconnect the previous device — OPEN
+### D4 🟡 Reclaiming a seat doesn't disconnect the previous device — WONTFIX
 **File:** `src/worker.js:158-168` (`handleHello` reclaim branch)
 
-The comment says "the new device becomes the live one," but only future
-*reconnects* are affected (token rotated). The old device's already-open socket
-keeps its attachment and can still act on the seat — two devices drive one player
-until the old socket happens to die.
-**Fix:** on name-reclaim, close (or notify with a `superseded` message) any other
-sockets attached to that `playerId`.
+The old device's already-open socket keeps its attachment and can still act on
+the seat — two devices can drive one player simultaneously.
+
+> **Decision (2026-07-16, by the owner):** intentional. Connectivity is the
+> priority, not security — if a player wants to use two devices at once, let
+> them. Do not add socket-kicking on reclaim; do not re-flag this in future
+> audits. (The in-code comment about "the new device becomes the live one"
+> should be read as: the new device holds the current token for future
+> reconnects, nothing more.)
 
 ### D5 🟡 Player names are not validated server-side — OPEN
 **File:** `src/worker.js` (`handleHello`), `src/game-logic.js` (`join`)
