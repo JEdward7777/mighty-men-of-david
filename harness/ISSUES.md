@@ -189,21 +189,25 @@ it's just dead, misleading code.
 
 ## Second audit (2026-07-16) — deeper pass over the DO-era code
 
-All items below are **OPEN** and verified against the source (not speculative).
-The D1–D3 cluster is the one that will bite real players on phones.
+All items were verified against the source (not speculative). **D1–D3 were fixed
+on 2026-07-16** (connection-resilience cluster); D4–D12 remain open pending
+discussion.
 
-### D1 🟠 No keepalive → silently dead sockets leave a stale UI — OPEN
+### D1 🟠 No keepalive → silently dead sockets leave a stale UI — RESOLVED
 **Files:** `src/worker.js`, `public/ws-transport.js` (no ping/pong anywhere)
 
 There is no heartbeat in either direction and no `visibilitychange` handling. A
 phone that sleeps, switches Wi-Fi→cellular, or sits idle through a long table
 discussion can lose its socket **without a close event ever firing**. The client
 then shows a frozen game and taps do nothing (see D6) until the user refreshes.
-**Fix:** DO: `ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'))`;
-client: send `ping` every ~25s, treat a missed `pong` as dead and reconnect; also
-reconnect on `visibilitychange` when `readyState !== OPEN`.
+**Fix (applied):** DO answers `'ping'`→`'pong'` via `setWebSocketAutoResponse`
+(no hibernation wake); client pings every 25s, counts *any* message as liveness,
+and presumes the socket dead after 60s of silence → teardown + reconnect. On
+`visibilitychange` the client reconnects immediately if the socket isn't OPEN, or
+verifies an "open" socket with a 4s ping probe. Bonus: the heartbeat tick also
+rescues a socket stuck in CLOSING whose close event never fires.
 
-### D2 🟠 Stale-socket `onclose` race clobbers the new connection — OPEN
+### D2 🟠 Stale-socket `onclose` race clobbers the new connection — RESOLVED
 **File:** `public/ws-transport.js:187-191, 237-250`
 
 `ws.onclose → _handleClose()` operates on `this.ws` unconditionally. Sequence:
@@ -211,18 +215,26 @@ connect attempt times out (15s) → `ws.close()` → retry creates a NEW socket 
 assigns `this.ws` → the OLD socket's `onclose` finally fires → `_handleClose`
 sets `this.ws = null` (clobbering the live socket), rejects the *new* attempt's
 pending promise, and can spawn a second parallel reconnect loop.
-**Fix:** capture the socket per-closure and bail early: `if (this.ws !== ws) return;`
-in `onclose`/`onmessage`; detach handlers from any socket being replaced.
+**Fix (applied):** every socket handler bails early when `this.ws !== ws`;
+`_connect` tears down (detaches + closes) any socket it replaces; the connect
+timeout also detaches the abandoned socket before rejecting.
 
-### D3 🟠 Auto-reconnect hello omits `name` → permanent reconnect loop — OPEN
+### D3 🟠 Auto-reconnect hello omits `name` → permanent reconnect loop — RESOLVED
 **File:** `public/ws-transport.js:266`
 
 `_scheduleReconnect` reconnects with `{ playerId, token }` only. If the token was
 rotated (the seat was reclaimed from another device — aec7dd6's feature), the
 server sees an invalid token and **no name**, answers "Unknown player", and closes.
 The client retries forever with the same stale credentials.
-**Fix:** include `name: this.playerName` in the reconnect hello; the server already
-prefers the token path when valid, so this only changes the failure case.
+**Fix (applied):** the reconnect hello now carries `name` alongside
+`playerId`/`token`; the server still prefers the token fast-path when valid, and
+falls back to a name reclaim (fresh token) when it isn't.
+
+Verified (all three) by `heartbeat-test.mjs` against `wrangler dev`: raw
+ping→pong; a silently-dead socket (neutered send) detected and replaced in ~2s;
+reconnect succeeds after a token rotation with the same seat and a fresh token;
+roster coherent afterwards. Full regression suite (8 suites, 100+ assertions)
+green.
 
 ### D4 🟡 Reclaiming a seat doesn't disconnect the previous device — OPEN
 **File:** `src/worker.js:158-168` (`handleHello` reclaim branch)

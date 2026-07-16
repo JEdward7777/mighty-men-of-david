@@ -40,6 +40,9 @@ export class GameRoom extends DurableObject {
     super(ctx, env);
     this.game = null;        // authoritative game state (from game-logic.js)
     this.secrets = {};       // { [playerId]: token } — never sent to clients
+    // Answer client heartbeat pings in the runtime itself, without waking the
+    // hibernated DO. Clients use this to detect silently dead connections.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     // Load persisted state before handling any request.
     ctx.blockConcurrencyWhile(async () => {
       this.game = (await ctx.storage.get('game')) || null;
