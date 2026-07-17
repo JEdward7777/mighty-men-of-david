@@ -281,14 +281,22 @@ moment the tap fails and a retry works seconds later. Actions are deliberately
 Verified by `send-fail-test.mjs`: tap on a silently-dead socket → banner +
 reconnect → retried action reaches the server.
 
-### D7 🟡 Disconnected players are invisible in the UI — OPEN
+### D7 🟡 Disconnected players are invisible in the UI — RESOLVED
 **File:** `public/index.html` (`updateLobby`, `renderQuest`)
 
 The server tracks and broadcasts `connected` per player, but no screen renders it.
 Mid-game the host can't tell that "waiting for the team" really means "Dave's
 phone died." The old WebRTC UI had per-player notices; the WS UI lost them.
-**Fix:** gray out / badge disconnected players in the lobby list and the quest
-progress list.
+**Fix (applied, visible to everyone by owner decision):** disconnected players
+are grayed out with an "Away" badge in the lobby, the vote checklist, and the
+quest progress list; when a phase is blocked on unreachable players a
+"Waiting on X (disconnected)" line names them (leader in team selection, host
+on the continue screens, pending voters/questers). Deliberately **omitted** in
+the assassination phase — naming a disconnected Saul would reveal who Saul is.
+Display only: no auto-skip, no timers, no acting on behalf of the disconnected.
+Verified by `away-test.mjs` (badge appears/clears across disconnect/reconnect
+in lobby and team vote; blocker line names Dave; game proceeds after he
+returns).
 
 ### D8 🟡 Stale team selection leaks across quests 4→5 and rejected votes — OPEN
 **File:** `public/index.html` (`renderTeamSelection`, `teamSelectionState`)

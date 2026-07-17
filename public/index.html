@@ -245,7 +245,23 @@
     .player-badge.voted {
       background: var(--ink-light);
     }
-    
+
+    .player-badge.away {
+      background: #8a8178;
+    }
+
+    .player-item.disconnected .player-name {
+      opacity: 0.45;
+    }
+
+    .waiting-disconnected {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      font-style: italic;
+      opacity: 0.75;
+      text-align: center;
+    }
+
     .quest-track {
       display: flex;
       justify-content: space-between;
@@ -1484,16 +1500,36 @@
       }
     }
     
+    // ---- Disconnected-player indicators (display only, visible to everyone) ----
+    function awayBadge(p) {
+      return p.connected === false ? '<span class="player-badge away">Away</span>' : '';
+    }
+
+    function disconnectedClass(p) {
+      return p.connected === false ? ' disconnected' : '';
+    }
+
+    // "Waiting on Dave (disconnected)" — names whose owners the phase is blocked
+    // on AND who are currently unreachable, so the table knows to go poke them.
+    function waitingOnDisconnected(state, blockedIds) {
+      const names = state.players
+        .filter(p => blockedIds.includes(p.id) && p.connected === false)
+        .map(p => escapeHtml(p.name));
+      if (names.length === 0) return '';
+      return `<div class="waiting-disconnected">Waiting on ${names.join(', ')} (disconnected)</div>`;
+    }
+
     // Update lobby UI
     function updateLobby(state) {
       document.getElementById('player-count').textContent = state.playerCount;
       
       const playerList = document.getElementById('lobby-players');
       playerList.innerHTML = state.players.map(p => `
-        <li class="player-item">
+        <li class="player-item${disconnectedClass(p)}">
           <span class="player-name">${escapeHtml(p.name)}</span>
           ${p.isHost ? '<span class="player-badge host">Host</span>' : ''}
           ${p.id === playerId ? '<span class="player-badge you">You</span>' : ''}
+          ${awayBadge(p)}
           ${state.isHost && !p.isHost
             ? `<button class="kick-btn" data-id="${p.id}" style="margin-left:8px;background:rgba(192,57,43,0.85);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;">Remove</button>`
             : ''}
@@ -1699,6 +1735,7 @@
         
         setupTeamSelector(questSize);
       } else {
+        const leaderId = state.players[state.leaderIndex]?.id;
         container.innerHTML = `
           <div class="phase-header">
             <div class="phase-title">Team Selection</div>
@@ -1706,6 +1743,7 @@
           </div>
           <div class="message waiting">
             Waiting for the leader to propose a team...
+            ${leaderId ? waitingOnDisconnected(state, [leaderId]) : ''}
           </div>
         `;
       }
@@ -1766,19 +1804,24 @@
       `;
       
       if (state.hasVoted) {
+        const notVotedIds = state.players
+          .filter(p => !state.votedPlayers.includes(p.id))
+          .map(p => p.id);
         html += `
           <div class="message waiting">
             Waiting for others to vote...
+            ${waitingOnDisconnected(state, notVotedIds)}
           </div>
           <div class="card">
             <h3>Voted</h3>
             <ul class="player-list">
               ${state.players.map(p => `
-                <li class="player-item">
+                <li class="player-item${disconnectedClass(p)}">
                   <span class="player-name">${escapeHtml(p.name)}</span>
-                  ${state.votedPlayers.includes(p.id) 
-                    ? '<span class="player-badge voted">Voted</span>' 
+                  ${state.votedPlayers.includes(p.id)
+                    ? '<span class="player-badge voted">Voted</span>'
                     : ''}
+                  ${awayBadge(p)}
                 </li>
               `).join('')}
             </ul>
@@ -1856,7 +1899,7 @@
         `;
       } else {
         html += `
-          <div class="message waiting">Waiting for host to continue...</div>
+          <div class="message waiting">Waiting for host to continue...${waitingOnDisconnected(state, state.players.filter(p => p.isHost).map(p => p.id))}</div>
         `;
       }
       
@@ -1913,6 +1956,9 @@
         `;
       }
       
+      const pendingTeamIds = state.proposedTeam.filter(
+        id => !state.questVotedPlayers?.includes(id)
+      );
       html += `
         <div class="card">
           <h3>Quest Progress</h3>
@@ -1921,13 +1967,15 @@
               const p = state.players.find(p => p.id === id);
               const voted = state.questVotedPlayers?.includes(id);
               return `
-                <li class="player-item">
+                <li class="player-item${p ? disconnectedClass(p) : ''}">
                   <span class="player-name">${escapeHtml(p?.name || 'Unknown')}</span>
                   ${voted ? '<span class="player-badge voted">Done</span>' : ''}
+                  ${p ? awayBadge(p) : ''}
                 </li>
               `;
             }).join('')}
           </ul>
+          ${waitingOnDisconnected(state, pendingTeamIds)}
         </div>
       `;
       
@@ -1999,7 +2047,7 @@
         `;
       } else {
         html += `
-          <div class="message waiting">Waiting for host to continue...</div>
+          <div class="message waiting">Waiting for host to continue...${waitingOnDisconnected(state, state.players.filter(p => p.isHost).map(p => p.id))}</div>
         `;
       }
       
