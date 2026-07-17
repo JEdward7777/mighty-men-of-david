@@ -7,9 +7,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node tests/run-all.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.110.0"
+    "jsdom": "^29.1.1",
+    "wrangler": "^4.110.0",
+    "ws": "^8.21.1"
   }
 }

@@ -59,9 +59,14 @@ npx wrangler dev
 ```
 
 ### Testing
-Open multiple browser tabs to simulate players; each tab keeps its own
-identity/token in `localStorage`. There is also a scripted end-to-end WebSocket
-test used during the DO migration (see `harness/DURABLE-OBJECTS-MIGRATION.md`).
+```bash
+npm test                # all 14 end-to-end suites (boots wrangler dev itself)
+npm test -- heartbeat   # filter by suite name
+```
+The suites in `tests/` use raw WebSockets and jsdom tabs against the real
+Worker + DO; see `tests/README.md` for what each covers. Run them after any
+change to `src/` or `public/`. For manual testing, open multiple browser tabs —
+each tab is its own player.
 
 ### Deploying to Cloudflare
 ```bash

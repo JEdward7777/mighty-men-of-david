@@ -68,6 +68,9 @@ npm install
 
 # Run the Worker + Durable Object locally (Miniflare)
 npx wrangler dev
+
+# Run the end-to-end test suite (boots its own dev server)
+npm test
 ```
 
 Open the printed `http://localhost:####` URL. Simulate players with multiple
