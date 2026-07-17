@@ -335,28 +335,39 @@ session survives an unreachable server across multiple backoff cycles, Retry-now
 reconnects promptly once the server returns, and a dead game code clears the
 session without looping.
 
-### D10 ⚪ `GAME_EXPIRY_SECONDS` env var is dead — OPEN
+### D10 ⚪ `GAME_EXPIRY_SECONDS` env var is dead — RESOLVED
 **Files:** `wrangler.toml:14`, `src/worker.js:20`
 
-The worker hardcodes `GAME_EXPIRY_MS = 2h`; the configured var is never read.
-**Fix:** read `env.GAME_EXPIRY_SECONDS` in the DO (it has `env`), or delete the var.
+The worker hardcoded `GAME_EXPIRY_MS = 2h`; the configured var was never read.
+**Fix (applied):** the DO reads `env.GAME_EXPIRY_SECONDS` in its constructor
+(falling back to 24h if missing/invalid) and the var is set to **86400 (24h)**
+per owner decision — a long table-talk lull can no longer expire a live game.
 
-### D11 ⚪ Dead code in the UI — OPEN
+### D11 ⚪ Dead code in the UI — RESOLVED
 **File:** `public/index.html`
 
 `playAttentionSound()` is defined but never called (README still advertises
 "Sound alerts when it's your turn"); `lastVotes` is declared and never used; a
 failed join/create leaves the orphaned transport instance behind (re-`initTransport`
 just abandons it).
-**Fix:** wire the sound up on turn transitions or remove it; delete `lastVotes`;
-destroy the transport on failed connect.
+**Fix (applied — sound implemented per owner):** `maybePlayAttentionSound()`
+beeps once when it becomes *your* turn (you drew leader, a vote opened, you're
+on the quest, you're Saul choosing, host's continue prompts), keyed on the
+exact decision point so re-broadcasts never re-beep. Shared AudioContext with
+`resume()` for autoplay policies. `lastVotes` deleted; `initTransport` now
+destroys any previous instance so failed joins can't leak timers/listeners.
+Verified by `sound-test.mjs` (stubbed AudioContext: silent lobby, one beep per
+decision, no re-beep on a player drop/reclaim broadcast, one shared context).
 
-### D12 ⚪ Docs drift — OPEN
+### D12 ⚪ Docs drift — RESOLVED
 **Files:** `README.md`, `src/game-logic.js`
 
 README's WebSocket action list omits `leave`/`kick`; the `version` field in the
 game state is vestigial (it existed for WebRTC host-recovery, which is gone).
-**Fix:** update README; consider dropping `version` or documenting it as unused.
+**Fix (applied):** README's action list now includes `leave`/`kick`, the
+`removed` server message, and the ping/pong keepalive. The vestigial `version`
+field was deleted from the game state (`_incrementVersion` → `_touch`, which
+only bumps `updatedAt`) — it existed for WebRTC host-recovery, which is gone.
 
 ---
 

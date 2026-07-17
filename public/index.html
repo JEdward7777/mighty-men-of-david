@@ -1143,8 +1143,7 @@
     let playerKnowledge = null;
 
     let isHoldingRole = false;
-    let lastVotes = null;
-    
+
     const ROLE_NAMES = {
       samuel: 'Samuel',
       david: 'David',
@@ -1245,6 +1244,10 @@
         return false;
       }
 
+      // Don't leak a previous instance's timers/listeners (e.g. after a failed
+      // join attempt, or joining fresh while an old retry loop is running).
+      if (transport) transport.destroy();
+
       transport = new GameTransport();
       transport.onStateUpdate = handleStateUpdate;
       transport.onConnectionChange = handleConnectionChange;
@@ -1342,21 +1345,58 @@
       }
     }
     
-    // Sound for attention
+    // Sound for attention. One shared AudioContext (created lazily, resumed on
+    // use — browsers suspend contexts created before a user gesture).
+    let audioCtx = null;
     function playAttentionSound() {
       try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(audioCtx.destination);
         osc.frequency.value = 440;
         gain.gain.value = 0.3;
         osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-        osc.stop(ctx.currentTime + 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.stop(audioCtx.currentTime + 0.3);
       } catch (e) {
         // Audio not supported
+      }
+    }
+
+    // Beep once when it becomes THIS player's turn to act. Keyed on the exact
+    // decision point (game/quest/proposal round), so the constant state
+    // re-broadcasts — reconnects, other players' taps — never re-beep, but each
+    // new decision does.
+    let lastAttentionKey = null;
+    function maybePlayAttentionSound(state) {
+      if (!state) return;
+      let key = null;
+      switch (state.phase) {
+        case 'team_selection':
+          if (state.isLeader) key = `lead:${state.code}:${state.currentQuest}:${state.rejectCount}`;
+          break;
+        case 'team_vote':
+          if (!state.hasVoted) key = `vote:${state.code}:${state.currentQuest}:${state.rejectCount}`;
+          break;
+        case 'quest':
+          if (state.isOnTeam && !state.hasQuestVoted) key = `quest:${state.code}:${state.currentQuest}`;
+          break;
+        case 'vote_result':
+          if (state.isHost) key = `cont-vote:${state.code}:${state.currentQuest}:${state.rejectCount}`;
+          break;
+        case 'quest_result':
+          if (state.isHost) key = `cont-quest:${state.code}:${state.currentQuest}`;
+          break;
+        case 'assassination':
+          if (state.isSaul) key = `assassinate:${state.code}`;
+          break;
+      }
+      if (key && key !== lastAttentionKey) {
+        lastAttentionKey = key;
+        playAttentionSound();
       }
     }
     // Create game
@@ -2236,8 +2276,9 @@
           updateQuestTrack(gameState);
           updateRejectTrack(gameState.rejectCount);
           renderPhaseContent(gameState);
+          maybePlayAttentionSound(gameState);
           break;
-          
+
         case 'game_over':
           showGameOver(gameState);
           break;

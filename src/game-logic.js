@@ -201,7 +201,6 @@ function createGame(hostName) {
     assassinationTarget: null,
     winner: null,  // 'good' or 'evil'
     winReason: null,
-    version: 0,     // Incremented on each state change for recovery
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
@@ -292,9 +291,8 @@ function getPublicGameState(game, playerId) {
 // These are pure functions that don't touch storage
 
 const GameActions = {
-  // Helper to increment version and update timestamp
-  _incrementVersion(game) {
-    game.version++;
+  // Mark the game as changed.
+  _touch(game) {
     game.updatedAt = Date.now();
   },
   
@@ -326,7 +324,7 @@ const GameActions = {
       connected: true,
       lastSeen: Date.now()
     });
-    this._incrementVersion(game);
+    this._touch(game);
     
     return { playerId: newPlayerId };
   },
@@ -340,7 +338,7 @@ const GameActions = {
 
     player.connected = true;
     player.lastSeen = Date.now();
-    this._incrementVersion(game);
+    this._touch(game);
 
     return { playerName: player.name };
   },
@@ -354,7 +352,7 @@ const GameActions = {
     if (idx === -1) throw new Error('Player not found');
     if (game.players[idx].isHost) throw new Error('The host cannot leave the game');
     game.players.splice(idx, 1);
-    this._incrementVersion(game);
+    this._touch(game);
     return { removedId: playerId };
   },
 
@@ -369,7 +367,7 @@ const GameActions = {
     if (idx === -1) throw new Error('Player not found');
     if (game.players[idx].isHost) throw new Error('The host cannot be removed');
     game.players.splice(idx, 1);
-    this._incrementVersion(game);
+    this._touch(game);
     return { removedId: targetId };
   },
   
@@ -397,7 +395,7 @@ const GameActions = {
     // Randomize leader
     game.leaderIndex = Math.floor(Math.random() * game.players.length);
     game.phase = GAME_PHASES.TEAM_SELECTION;
-    this._incrementVersion(game);
+    this._touch(game);
     
     return { success: true };
   },
@@ -427,7 +425,7 @@ const GameActions = {
     game.proposedTeam = team;
     game.votes = {};
     game.phase = GAME_PHASES.TEAM_VOTE;
-    this._incrementVersion(game);
+    this._touch(game);
     
     return { success: true };
   },
@@ -447,7 +445,7 @@ const GameActions = {
     }
     
     game.votes[playerId] = !!approve;
-    this._incrementVersion(game);
+    this._touch(game);
     
     // Check if all votes are in
     if (Object.keys(game.votes).length === game.players.length) {
@@ -502,7 +500,7 @@ const GameActions = {
       }
     }
     
-    this._incrementVersion(game);
+    this._touch(game);
     return { success: true };
   },
   
@@ -528,7 +526,7 @@ const GameActions = {
     }
     
     game.questVotes[playerId] = !!success;
-    this._incrementVersion(game);
+    this._touch(game);
     
     let questComplete = false;
     let questResult = null;
@@ -585,7 +583,7 @@ const GameActions = {
       game.phase = GAME_PHASES.TEAM_SELECTION;
     }
     
-    this._incrementVersion(game);
+    this._touch(game);
     return { success: true };
   },
   
@@ -616,7 +614,7 @@ const GameActions = {
     }
     
     game.phase = GAME_PHASES.GAME_OVER;
-    this._incrementVersion(game);
+    this._touch(game);
     
     return { success: true };
   }

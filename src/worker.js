@@ -18,7 +18,7 @@ import {
   GameActions
 } from './game-logic.js';
 
-const GAME_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours of inactivity
+const DEFAULT_EXPIRY_SECONDS = 24 * 60 * 60; // used if the env var is missing/invalid
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 4;
 
@@ -41,6 +41,9 @@ export class GameRoom extends DurableObject {
     super(ctx, env);
     this.game = null;        // authoritative game state (from game-logic.js)
     this.secrets = {};       // { [playerId]: token } — never sent to clients
+    // Inactivity expiry, configurable via wrangler.toml [vars].
+    const configured = Number(env.GAME_EXPIRY_SECONDS);
+    this.expiryMs = (configured > 0 ? configured : DEFAULT_EXPIRY_SECONDS) * 1000;
     // Answer client heartbeat pings in the runtime itself, without waking the
     // hibernated DO. Clients use this to detect silently dead connections.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
@@ -54,7 +57,7 @@ export class GameRoom extends DurableObject {
   // Persist game + secrets atomically, and refresh the inactivity alarm.
   async persist() {
     await this.ctx.storage.put({ game: this.game, secrets: this.secrets });
-    await this.ctx.storage.setAlarm(Date.now() + GAME_EXPIRY_MS);
+    await this.ctx.storage.setAlarm(Date.now() + this.expiryMs);
   }
 
   // ---- RPC: called by the Worker when a host creates a game ----

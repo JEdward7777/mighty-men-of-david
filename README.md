@@ -126,9 +126,10 @@ The HTTP surface is tiny — everything else happens over the WebSocket.
 
 Over the WebSocket, the client sends `{type:'hello', ...}` to join/reconnect and
 `{type:'action', action, data}` to play (`start`, `propose`, `vote`,
-`continueFromVote`, `questVote`, `continueFromQuest`, `assassinate`). The server
-sends `{type:'identity'}`, per-player `{type:'state', state, knowledge}`, and
-`{type:'error'}`.
+`continueFromVote`, `questVote`, `continueFromQuest`, `assassinate`, `leave`,
+`kick`). The server sends `{type:'identity'}`, per-player
+`{type:'state', state, knowledge}`, `{type:'removed'}` when the host kicks you,
+and `{type:'error'}`. The client also pings (`'ping'`/`'pong'`) as a keepalive.
 
 ## 🎯 Role Distribution
 
