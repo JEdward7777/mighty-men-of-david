@@ -1690,20 +1690,22 @@
       }
     }
     
-    // Track team selection state globally so it persists across renders
+    // Track team selection state globally so it persists across renders.
+    // The key ties the selection to one specific game + quest: any other
+    // game/quest gets a fresh set, so picks can't leak across quests (4 and 5
+    // are both size 6) or carry ghost player ids into the next game.
     let teamSelectionState = {
-      selected: new Set(),
-      questSize: 0
+      key: null,
+      selected: new Set()
     };
-    
+
     // Team selection phase
     function renderTeamSelection(container, state) {
       const questSize = state.questSizes[state.currentQuest];
-      
-      // Reset selection if quest changed
-      if (teamSelectionState.questSize !== questSize) {
-        teamSelectionState.selected = new Set();
-        teamSelectionState.questSize = questSize;
+
+      const selectionKey = `${state.code}:${state.currentQuest}`;
+      if (teamSelectionState.key !== selectionKey) {
+        teamSelectionState = { key: selectionKey, selected: new Set() };
       }
       
       if (state.isLeader) {
@@ -2067,12 +2069,18 @@
     }
     
     // Assassination phase
-    // Track assassination selection state globally so it persists across renders
+    // Track assassination selection state globally so it persists across
+    // renders. Keyed by game code so a leftover target can't ghost into the
+    // next game played in this tab.
     let assassinationState = {
+      key: null,
       selectedTarget: null
     };
-    
+
     function renderAssassination(container, state) {
+      if (assassinationState.key !== state.code) {
+        assassinationState = { key: state.code, selectedTarget: null };
+      }
       if (state.isSaul) {
         const hasSelection = assassinationState.selectedTarget !== null;
         

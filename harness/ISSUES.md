@@ -298,16 +298,23 @@ Verified by `away-test.mjs` (badge appears/clears across disconnect/reconnect
 in lobby and team vote; blocker line names Dave; game proceeds after he
 returns).
 
-### D8 🟡 Stale team selection leaks across quests 4→5 and rejected votes — OPEN
+### D8 🟡 Stale team selection leaks across quests 4→5 and rejected votes — RESOLVED
 **File:** `public/index.html` (`renderTeamSelection`, `teamSelectionState`)
 
-Selection reset is keyed on **quest size**, but `QUEST_SIZES = [3,4,5,6,6]` —
-quests 4 and 5 are both 6, so the leader of quest 5 starts with quest 4's picks
-pre-selected. Same for a leader who regains leadership after rejections. Also
-`exitToHome` never resets `teamSelectionState`/`assassinationState`, so picks can
-leak into the *next game* in the same tab.
-**Fix:** key the reset on `currentQuest` (and reset both state objects in
-`exitToHome`).
+Selection reset was keyed on **quest size**, but `QUEST_SIZES = [3,4,5,6,6]` —
+quests 4 and 5 are both 6, so the leader of quest 5 started with quest 4's picks
+pre-selected. Worse, nothing reset the state across games, so a new game in the
+same tab could carry **ghost player ids** from the old one ("Invalid team
+member" on propose, with no visible cause). Same for a leftover assassination
+target ("Target not found").
+**Fix (applied — simpler than first planned):** the selection state carries a
+key of the game + quest it belongs to (`code:currentQuest`; assassination keyed
+by `code`); any mismatch gets a fresh set. Self-contained — no `exitToHome`
+cleanup needed, since the tag check covers every path. The good property
+(selection surviving mid-pick re-renders within one quest) is preserved.
+Verified by `selection-test.mjs`: two games back-to-back in one tab — game B's
+selector starts empty (0/3, propose disabled) — and in-quest selections survive
+disconnect/reconnect broadcasts.
 
 ### D9 🟡 A transient failure during auto-rejoin permanently drops the session — OPEN
 **File:** `public/index.html` (`rejoinGame` catch block)
