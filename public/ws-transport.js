@@ -389,10 +389,21 @@ class GameTransport {
 
   _send(obj) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(obj));
+      try {
+        this.ws.send(JSON.stringify(obj));
+        return;
+      } catch (e) {
+        dbg('WS', 'Send threw:', e && e.message);
+      }
     } else {
       dbg('WS', 'Cannot send, socket not open:', obj.type);
     }
+    // The message could not be delivered — most likely a player tapped a button
+    // on a silently dead connection. Don't swallow it: show the reconnecting
+    // banner and start recovering immediately so a retry works in a moment.
+    if (this._intentionalClose || !this.gameCode) return;
+    this._emit({ type: 'disconnected-from-host' });
+    this._checkAliveNow();
   }
 
   // ============ Helpers ============

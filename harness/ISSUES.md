@@ -266,14 +266,20 @@ now true across devices and keyboards. Verified by `name-test.mjs` (decomposed
 and composed José map to one seat; zero-width stripped; whitespace-only
 rejected; 5000-char name capped).
 
-### D6 🟡 Actions sent while disconnected are silently dropped — OPEN
+### D6 🟡 Actions sent while disconnected are silently dropped — RESOLVED
 **File:** `public/ws-transport.js:276-282` (`_send`)
 
 If the socket isn't OPEN, `_send` just logs to the console. A player who taps
 Vote/Success during a blip gets no feedback, nothing is queued, and no reconnect
 is triggered — combined with D1 this looks like "the game ate my vote."
-**Fix:** surface it (onError / reconnecting notice), kick off a reconnect, and
-optionally queue the most recent action to send after resuming.
+**Fix (applied, option 1 — no queuing by owner decision):** when `_send` can't
+deliver (socket not OPEN, or `send` throws), the transport emits
+`disconnected-from-host` (shows the reconnecting banner) and immediately runs
+the same liveness check as the visibility handler, so recovery starts the
+moment the tap fails and a retry works seconds later. Actions are deliberately
+**not** queued — no surprise deferred moves (especially assassination).
+Verified by `send-fail-test.mjs`: tap on a silently-dead socket → banner +
+reconnect → retried action reaches the server.
 
 ### D7 🟡 Disconnected players are invisible in the UI — OPEN
 **File:** `public/index.html` (`updateLobby`, `renderQuest`)
