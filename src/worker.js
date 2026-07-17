@@ -14,6 +14,7 @@ import {
   createGame,
   getPublicGameState,
   getPlayerKnowledge,
+  normalizeName,
   GameActions
 } from './game-logic.js';
 
@@ -154,9 +155,12 @@ export class GameRoom extends DurableObject {
       const player = this.game.players.find((p) => p.id === playerId);
       player.connected = true;
       player.lastSeen = Date.now();
-    } else if (msg.name) {
+    } else if (normalizeName(msg.name)) {
+      // Canonicalize before storing or comparing, so "the same name" matches
+      // across devices and keyboards (unicode forms, zero-width chars, spacing).
+      const name = normalizeName(msg.name);
       const existing = this.game.players.find(
-        (p) => p.name.toLowerCase() === msg.name.toLowerCase()
+        (p) => normalizeName(p.name).toLowerCase() === name.toLowerCase()
       );
       if (existing) {
         // Reclaim an existing seat with just game code + name — works from ANY
@@ -315,7 +319,7 @@ async function handleCreate(request, env) {
   } catch {
     /* empty body */
   }
-  const name = (body.name || '').trim();
+  const name = normalizeName(body.name);
   if (!name) return jsonResponse({ error: 'Name is required' }, 400);
 
   // Generate a unique code by asking each candidate DO to claim it.

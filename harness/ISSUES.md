@@ -249,7 +249,7 @@ the seat — two devices can drive one player simultaneously.
 > should be read as: the new device holds the current token for future
 > reconnects, nothing more.)
 
-### D5 🟡 Player names are not validated server-side — OPEN
+### D5 🟡 Player names are not validated server-side — RESOLVED
 **File:** `src/worker.js` (`handleHello`), `src/game-logic.js` (`join`)
 
 `msg.name` is used raw: no trim, no length cap. `" Bob"` and `"Bob"` are distinct
@@ -257,8 +257,14 @@ players, and a whitespace-padded name breaks later reclaim-by-name matching
 (`toLowerCase()` compare, no trim). A multi-kilobyte name is accepted, persisted,
 and rendered (escaped, but layout-breaking). `/api/create` trims; hello doesn't —
 inconsistent.
-**Fix:** in `handleHello`, `name = (msg.name || '').trim().slice(0, 20)` and reject
-empty; compare names with the same normalization everywhere.
+**Fix (applied):** `normalizeName()` in `game-logic.js` — NFC unicode
+normalization (composed vs decomposed é across iOS/Android keyboards), strip
+zero-width chars, trim + collapse whitespace, cap at 20 — used everywhere names
+are stored or compared (`join`, hello reclaim matching, `/api/create`). This is
+a *connectivity* fix at heart: "the same name gets you back into your game" is
+now true across devices and keyboards. Verified by `name-test.mjs` (decomposed
+and composed José map to one seat; zero-width stripped; whitespace-only
+rejected; 5000-char name capped).
 
 ### D6 🟡 Actions sent while disconnected are silently dropped — OPEN
 **File:** `public/ws-transport.js:276-282` (`_send`)

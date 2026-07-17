@@ -61,6 +61,21 @@ function generatePlayerId() {
   return 'p_' + Math.random().toString(36).substring(2, 18);
 }
 
+// Normalize a player name so that "the same name" is the same name across
+// devices and keyboards: unify unicode forms (iOS composed é vs Android
+// decomposed e+◌́), strip zero-width characters some keyboards insert, trim,
+// collapse internal whitespace, and cap the length (matches the UI's
+// maxlength). Purely canonicalization — emoji and any visible characters are
+// left alone. Used everywhere a name is stored or compared.
+function normalizeName(name) {
+  return String(name || '')
+    .normalize('NFC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 20);
+}
+
 function shuffleArray(array) {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -285,14 +300,19 @@ const GameActions = {
   
   // Join an existing game
   join(game, playerName) {
+    playerName = normalizeName(playerName);
+    if (!playerName) {
+      throw new Error('Name is required');
+    }
+
     if (game.phase !== GAME_PHASES.LOBBY) {
       throw new Error('Game has already started');
     }
-    
+
     if (game.players.length >= 12) {
       throw new Error('Game is full');
     }
-    
+
     if (game.players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
       throw new Error('Name already taken');
     }
@@ -614,6 +634,7 @@ export {
   TEAM_COMPOSITION,
   generateCode,
   generatePlayerId,
+  normalizeName,
   shuffleArray,
   isEvil,
   assignRoles,
