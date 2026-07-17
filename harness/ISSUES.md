@@ -316,14 +316,24 @@ Verified by `selection-test.mjs`: two games back-to-back in one tab — game B's
 selector starts empty (0/3, propose disabled) — and in-quest selections survive
 disconnect/reconnect broadcasts.
 
-### D9 🟡 A transient failure during auto-rejoin permanently drops the session — OPEN
+### D9 🟡 A transient failure during auto-rejoin permanently drops the session — RESOLVED
 **File:** `public/index.html` (`rejoinGame` catch block)
 
-On page load, `rejoinGame(true)`'s catch calls `clearSession()` for *any* error —
-including a network blip or a slow server. The tab then forgets the game entirely
-(user must re-enter code+name via Join).
-**Fix:** only clear the session on definitive rejections ("Game not found" /
-"removed"); otherwise keep it and retry with backoff.
+On page load, `rejoinGame(true)`'s catch called `clearSession()` for *any* error —
+including a network blip or a slow server. The tab then forgot the game entirely
+(user had to re-enter code+name via Join).
+**Fix (applied, Gmail-style per owner):** failures are classified. Definitive
+rejections (game not found / already started / full / unknown player) clear the
+session and stop. Anything transient keeps the session and the transport retries
+**forever** with backoff (1→16s cap, jittered, interruptible); the reconnecting
+banner gains a **"Retry now"** button that skips the current wait. Fatal errors
+hit mid-loop emit `reconnect-failed` so the UI cleans up (e.g. game expires while
+retrying). Bonus: leaving a game now cancels any pending retry (previously a
+zombie timer could reconnect a destroyed transport) and the banner is cleared on
+`exitToHome`. Verified by `rejoin-retry-test.mjs` with a killable TCP proxy:
+session survives an unreachable server across multiple backoff cycles, Retry-now
+reconnects promptly once the server returns, and a dead game code clears the
+session without looping.
 
 ### D10 ⚪ `GAME_EXPIRY_SECONDS` env var is dead — OPEN
 **Files:** `wrangler.toml:14`, `src/worker.js:20`

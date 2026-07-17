@@ -131,7 +131,18 @@ class GameTransport {
       hello.playerId = identity.playerId;
       hello.token = identity.token;
     }
-    await this._connect(hello);
+    try {
+      await this._connect(hello);
+    } catch (e) {
+      // A transient failure (network down, server unreachable) must not end a
+      // rejoin: keep retrying in the background with backoff, Gmail-style. The
+      // error is rethrown tagged so the UI knows to keep the session and wait.
+      if (!this._intentionalClose && !this._isFatalError(e.message)) {
+        e.transient = true;
+        if (!this._reconnecting) this._scheduleReconnect();
+      }
+      throw e;
+    }
     return { gameCode: this.gameCode, playerId: this.playerId, isHost: this.isHost };
   }
 
@@ -152,6 +163,10 @@ class GameTransport {
     if (this._heartbeatTimer) {
       clearInterval(this._heartbeatTimer);
       this._heartbeatTimer = null;
+    }
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
     }
     document.removeEventListener('visibilitychange', this._onVisibility);
     if (this.ws) {
@@ -367,7 +382,18 @@ class GameTransport {
     this._reconnectAttempt++;
 
     dbg('WS', `Reconnecting in ${delay}ms (attempt ${this._reconnectAttempt})`);
-    await new Promise((r) => setTimeout(r, delay));
+    // Interruptible backoff: retryNow() can cut the wait short.
+    await new Promise((resolve) => {
+      this._reconnectWake = () => { clearTimeout(this._reconnectTimer); resolve(); };
+      this._reconnectTimer = setTimeout(resolve, delay);
+    });
+    this._reconnectWake = null;
+
+    // The player may have left the game while we were waiting.
+    if (this._intentionalClose) {
+      this._reconnecting = false;
+      return;
+    }
 
     try {
       // Include the name alongside the token: if our token was rotated (the seat
@@ -383,7 +409,40 @@ class GameTransport {
     } catch (e) {
       dbg('WS', `Reconnect failed: ${e.message}`);
       this._reconnecting = false;
-      this._scheduleReconnect(); // keep trying with backoff
+      if (this._intentionalClose) return;
+      if (this._isFatalError(e.message)) {
+        // The game is definitively gone (expired, or we can no longer get in).
+        // Stop the loop and let the UI clean up.
+        this._emit({ type: 'reconnect-failed', message: e.message });
+        return;
+      }
+      this._scheduleReconnect(); // keep trying with backoff, forever
+    }
+  }
+
+  // Errors that no amount of retrying will fix.
+  _isFatalError(msg) {
+    return /game not found|already started|game is full|unknown player|name already taken/i.test(msg || '');
+  }
+
+  // True once a connection is established and the first state has arrived.
+  isConnected() {
+    return !!(this.ws && this.ws.readyState === WebSocket.OPEN && this._gotFirstState);
+  }
+
+  // Gmail-style "Retry now": skip the current backoff wait (or kick a fresh
+  // liveness check if no retry is pending) and start from a short delay again.
+  retryNow() {
+    dbg('WS', 'Manual retry requested');
+    this._reconnectAttempt = 0;
+    if (this._reconnectWake) {
+      const wake = this._reconnectWake;
+      this._reconnectWake = null;
+      wake();
+      return;
+    }
+    if (!this._reconnecting && !this._connectResolve && !this.isConnected()) {
+      this._checkAliveNow();
     }
   }
 

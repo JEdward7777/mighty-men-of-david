@@ -1169,14 +1169,24 @@
     let transport = null;
 
     // "Reconnecting…" banner, shown while the WebSocket is re-establishing.
+    // Gmail-style: retries continue forever with backoff in the transport, and
+    // the button lets an impatient (or newly back-in-signal) player skip the wait.
     function showReconnectingNotice() {
       let notice = document.getElementById('reconnecting-notice');
       if (!notice) {
         notice = document.createElement('div');
         notice.id = 'reconnecting-notice';
         notice.className = 'disconnection-notice host-disconnect';
-        notice.textContent = 'Reconnecting…';
+        notice.innerHTML = 'Reconnecting… <button id="btn-retry-now" style="' +
+          'margin-left:10px;background:rgba(255,255,255,0.25);color:#fff;' +
+          'border:1px solid rgba(255,255,255,0.6);border-radius:4px;' +
+          'padding:2px 10px;font-family:inherit;font-size:0.85em;cursor:pointer;' +
+          '">Retry now</button>';
         document.body.appendChild(notice);
+        notice.querySelector('#btn-retry-now').addEventListener('click', () => {
+          if (transport) transport.retryNow();
+          else rejoinGame(true);
+        });
       }
       notice.style.display = 'block';
     }
@@ -1217,6 +1227,13 @@
           hideReconnectingNotice();
           exitToHome();
           alert(event.message || 'You were removed from the game.');
+          break;
+        case 'reconnect-failed':
+          // The retry loop hit a fatal error — the game is definitively gone
+          // (expired, or we can no longer get in). Stop pretending.
+          hideReconnectingNotice();
+          exitToHome();
+          alert('Could not reconnect: ' + (event.message || 'the game is no longer available.'));
           break;
       }
     }
@@ -1297,6 +1314,7 @@
       playerKnowledge = null;
       playerId = null;
       gameCode = null;
+      hideReconnectingNotice();
       document.getElementById('game-code-display').style.display = 'none';
       document.getElementById('rejoin-section').classList.add('hidden');
       showScreen('screen-home');
@@ -1427,8 +1445,15 @@
       const session = loadSession();
       if (!session || !session.name) return;
 
+      // Already connected (e.g. a background retry beat the button press).
+      if (transport && transport.isConnected()) {
+        hideReconnectingNotice();
+        return;
+      }
+
       try {
-        if (!initTransport()) {
+        // Reuse an existing transport so its retry state carries over.
+        if (!transport && !initTransport()) {
           if (!auto) alert('Failed to initialize transport');
           return;
         }
@@ -1447,6 +1472,15 @@
 
         console.log('Rejoined game');
       } catch (error) {
+        if (error && error.transient) {
+          // Network blip, not a verdict: the transport keeps retrying in the
+          // background (Gmail-style) and the banner's Retry-now button stays
+          // available. Crucially, the session is KEPT — a dead spot in the
+          // Wi-Fi must not make the tab forget which game it belongs to.
+          console.log('Rejoin pending, retrying in background:', error.message);
+          return;
+        }
+        // Definitive rejection (game expired / no longer able to get in).
         hideReconnectingNotice();
         if (!auto) alert('Could not rejoin game: ' + error.message);
         clearSession();
