@@ -12,6 +12,7 @@ WebRTC that does not work across networks). This folder is where we keep score.
 | File | Purpose |
 |------|---------|
 | [`ISSUES.md`](./ISSUES.md) | Catalogue of problems found in the code, ranked by severity |
+| [`RUNNING-TESTS.md`](./RUNNING-TESTS.md) | How to run the suite without tripping over the environment — **read before calling a test flaky** |
 | [`DURABLE-OBJECTS-MIGRATION.md`](./DURABLE-OBJECTS-MIGRATION.md) | Plan + progress for replacing WebRTC P2P with a Durable Object |
 
 ## How to use
@@ -21,3 +22,5 @@ WebRTC that does not work across networks). This folder is where we keep score.
 - When you fix something, mark it resolved (don't delete it — the history is
   useful) and reference the commit.
 - Keep the migration doc updated as the source of truth for the DO rewrite.
+- Run `npm test` after touching `src/` or `public/`. If a suite fails,
+  investigate it — don't re-run until it's green. See `RUNNING-TESTS.md`.

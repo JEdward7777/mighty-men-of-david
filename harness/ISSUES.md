@@ -398,6 +398,38 @@ unknown-game rejection) passes against `wrangler dev`.
 
 ---
 
+## D14 🟡 Stale team selector survived into the next game — RESOLVED (2026-07-25)
+**File:** `public/index.html` (`renderTeamSelection`)
+
+Caught by `selection-test` immediately after D13 — another "flaky" failure that
+was a real bug. This is **D8 fixed only halfway**: D8 reset the selection *state*
+when the game or quest changed, but the early-return that preserves an
+in-progress pick across re-renders keyed on *DOM existence alone*:
+
+```js
+if (document.getElementById('team-selector')) return;  // "someone already rendered one"
+```
+
+So a selector left over from a previous game in the same tab was kept and never
+re-rendered: it still showed that game's highlighted players and its old
+"Propose Team (2/3)" label, while `teamSelectionState` had correctly been reset
+to empty — the display contradicting the actual state.
+
+**Repro:** be leader, tap some players, press Leave, start another game, become
+leader again → the previous game's picks are still highlighted.
+
+**Why it looked flaky:** the test retries game creation until the host draws
+leader, and every *non*-leader attempt renders the other branch, which wipes
+`#team-selector`. It only fails when the host draws leader on the first attempt
+(~1 in 6) with no intervening render to clear the stale DOM.
+
+**Fix:** tag the selector with the selection key (`data-key="code:quest"`) and
+only keep it when that key matches the current game+quest. Verified by running
+`selection-test` repeatedly until the attempt-1 path was hit — fails before, passes
+after.
+
+---
+
 ## D13 🔴 Reconnect loop from stale heartbeat timestamp — RESOLVED (2026-07-25)
 **File:** `public/ws-transport.js` (`_connect` / `_startHeartbeat` / `_heartbeatTick`)
 

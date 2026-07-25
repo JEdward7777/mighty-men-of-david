@@ -60,13 +60,20 @@ npx wrangler dev
 
 ### Testing
 ```bash
-npm test                # all 14 end-to-end suites (boots wrangler dev itself)
+npm test                # all 16 end-to-end suites (boots wrangler dev itself)
 npm test -- heartbeat   # filter by suite name
 ```
 The suites in `tests/` use raw WebSockets and jsdom tabs against the real
-Worker + DO; see `tests/README.md` for what each covers. Run them after any
-change to `src/` or `public/`. For manual testing, open multiple browser tabs —
-each tab is its own player.
+Worker + DO; see `tests/README.md` for what each covers and the conventions for
+writing new ones. Run them after any change to `src/` or `public/`. For manual
+testing, open multiple browser tabs — each tab is its own player.
+
+The suite is deterministic — **a failure means something is broken.** Don't
+re-run until it goes green. Before blaming the environment, read
+`harness/RUNNING-TESTS.md`: it covers the output/timeout handling and the
+`pkill -f wrangler` foot-gun (it kills its own shell, which masquerades as
+random environment failures). Intermittent failures here were dismissed as
+"flaky timing" twice and turned out to be a real reconnect-loop bug (D13).
 
 ### Deploying to Cloudflare
 ```bash

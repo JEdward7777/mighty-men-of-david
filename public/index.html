@@ -1892,20 +1892,24 @@
       }
       
       if (state.isLeader) {
-        // Check if we already have the team selector rendered
+        // Keep an already-rendered selector so a re-render (someone reconnects,
+        // another player acts) doesn't wipe a half-finished pick — but ONLY if
+        // it belongs to this game+quest. Keying purely on "does the element
+        // exist" leaves a stale selector from a previous game in this tab still
+        // showing its highlighted picks and its old "2/3" count, while the
+        // actual selection state has correctly been reset to empty.
         const existingSelector = document.getElementById('team-selector');
-        if (existingSelector) {
-          // Don't re-render, just return to preserve selection
+        if (existingSelector && existingSelector.dataset.key === selectionKey) {
           return;
         }
-        
+
         container.innerHTML = `
           <div class="phase-header">
             <div class="phase-title">Select Your Team</div>
             <div class="phase-subtitle">Choose ${questSize} members for Quest ${state.currentQuest + 1}</div>
           </div>
           ${questRuleMessage(state)}
-          <div class="team-selector" id="team-selector">
+          <div class="team-selector" id="team-selector" data-key="${selectionKey}">
             ${state.players.map(p => `
               <div class="team-player ${teamSelectionState.selected.has(p.id) ? 'selected' : ''}" data-id="${p.id}">
                 <span class="player-name">${escapeHtml(p.name)}</span>
