@@ -216,6 +216,10 @@ function getPublicGameState(game, playerId) {
     code: game.code,
     phase: game.phase,
     playerCount: game.players.length,
+    // How many good/evil for each supported player count, so the lobby can
+    // show "what happens as more people join" without duplicating this table
+    // client-side (it's the single source of truth used by assignRoles()).
+    teamComposition: TEAM_COMPOSITION,
     players: game.players.map(p => ({
       id: p.id,
       name: p.name,

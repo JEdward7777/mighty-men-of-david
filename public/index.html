@@ -84,7 +84,48 @@
       padding-bottom: 12px;
       margin-bottom: 16px;
     }
-    
+
+    .team-comp-details summary {
+      font-family: 'Cinzel', serif;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 0.95rem;
+    }
+
+    .team-comp-details[open] summary {
+      margin-bottom: 12px;
+    }
+
+    .team-comp-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.3fr;
+      gap: 8px;
+      padding: 6px 4px;
+      font-size: 0.85rem;
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+    }
+
+    .team-comp-row.current {
+      background: rgba(201, 162, 39, 0.18);
+      border-radius: 4px;
+      font-weight: 700;
+    }
+
+    .team-comp-good {
+      color: var(--good);
+    }
+
+    .team-comp-evil {
+      color: var(--evil);
+    }
+
+    .team-comp-doeg {
+      font-weight: 400;
+      opacity: 0.75;
+      font-size: 0.9em;
+    }
+
     input[type="text"] {
       width: 100%;
       padding: 12px 16px;
@@ -1086,7 +1127,12 @@
         </div>
         <ul class="player-list" id="lobby-players"></ul>
       </div>
-      
+
+      <details class="card team-comp-details">
+        <summary>How many bad guys? (role breakdown by player count)</summary>
+        <div id="team-comp-table"></div>
+      </details>
+
       <div id="host-controls" class="hidden">
         <button class="btn btn-primary" id="btn-start" disabled>
           Start Game (Need 6+ players)
@@ -1627,9 +1673,38 @@
       return `<div class="quest-result-explanation">${votes} played — ${needed} — so this quest ${result.success ? 'succeeded' : 'failed'}.</div>`;
     }
 
+    // "How many bad guys with N players?" — a reference table so the table can
+    // see how the good/evil split (and whether Doeg is in play) changes as
+    // people join or leave the lobby, without anyone needing to look it up.
+    // Sourced from the server's teamComposition (single source of truth —
+    // don't duplicate this table client-side, see game-logic.js).
+    function renderTeamComposition(state) {
+      const container = document.getElementById('team-comp-table');
+      if (!container || !state.teamComposition) return;
+
+      const rows = Object.keys(state.teamComposition)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map(count => {
+          const { good, evil } = state.teamComposition[count];
+          const isCurrent = count === state.playerCount;
+          const doegNote = evil >= 3 ? ' <span class="team-comp-doeg">(incl. Doeg)</span>' : '';
+          return `
+            <div class="team-comp-row${isCurrent ? ' current' : ''}">
+              <span class="team-comp-count">${count} players</span>
+              <span class="team-comp-good">${good} Good</span>
+              <span class="team-comp-evil">${evil} Evil${doegNote}</span>
+            </div>
+          `;
+        }).join('');
+
+      container.innerHTML = rows;
+    }
+
     // Update lobby UI
     function updateLobby(state) {
       document.getElementById('player-count').textContent = state.playerCount;
+      renderTeamComposition(state);
       
       const playerList = document.getElementById('lobby-players');
       playerList.innerHTML = state.players.map(p => `

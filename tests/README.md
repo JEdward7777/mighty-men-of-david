@@ -28,6 +28,7 @@ leaves it running afterwards).
 | `sound-test` | Turn-alert beep: once per decision point, never on re-broadcasts |
 | `rejoin-retry-test` | Gmail-style endless rejoin retry via a killable TCP proxy; Retry-now button; fatal errors clear the session |
 | `quest-rules-test` | Quest team size is always < player count (never forces selecting everyone); pass/fail rules are explained in text at every phase, including the "2 fails needed" quest that caused real-table confusion |
+| `team-composition-test` | Lobby's "how many bad guys?" role-breakdown table lists every supported player count with the correct good/evil split and Doeg note, and highlights the row matching the current lobby size as players join |
 | `selection-test` | Team selection can't leak across games/quests; survives re-renders (replays games until the host draws leader, so it's the slowest) |
 
 Conventions: each suite prints `✓`/`✗` per assertion and a final
