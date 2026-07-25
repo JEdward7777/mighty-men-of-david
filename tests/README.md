@@ -32,6 +32,28 @@ leaves it running afterwards).
 | `selection-test` | Team selection can't leak across games/quests; survives re-renders (replays games until the host draws leader, so it's the slowest) |
 
 Conventions: each suite prints `✓`/`✗` per assertion and a final
-`RESULT: N passed, M failed`, and exits nonzero on failure. Timing-sensitive
-suites use generous waits — if one flakes under heavy load, rerun it alone
-(`npm test -- <name>`) before suspecting a real regression.
+`RESULT: N passed, M failed`, and exits nonzero on failure.
+
+**Never sleep a fixed guess before asserting.** State arrives asynchronously
+(client → DO → broadcast → client), so `await wait(200)` is plenty on an idle
+machine and not nearly enough when the whole suite is hammering one dev server.
+Use `waitFor()` from `helpers.mjs` instead — it polls, so it's fast when the
+system is fast and patient when it isn't:
+
+```js
+check('phase = team_vote', await waitFor(() => host.state.phase === 'team_vote'));
+```
+
+Two rules when writing one:
+
+- **Make the predicate specific to what you're waiting for.** A predicate that
+  is already true of the *current* screen (e.g. rule text that appears on every
+  phase) matches instantly and races ahead of the transition. Gate on the
+  server's phase, or on a marker unique to the target screen.
+- **Keep fixed waits for *negative* assertions** ("no error arrived", "the beep
+  count did not increase", "the socket stayed up"). Polling can't prove absence;
+  there you genuinely want to let time pass and then look.
+
+A failure here means something is actually broken. Don't rerun until it's green
+— that is how a real bug once hid behind a "known flaky" label for days (see the
+D1 heartbeat regression in `harness/ISSUES.md`).

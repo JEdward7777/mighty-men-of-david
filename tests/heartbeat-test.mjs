@@ -8,6 +8,7 @@
 import { JSDOM } from 'jsdom';
 import WebSocket from 'ws';
 import fs from 'fs';
+import { waitFor } from './helpers.mjs';
 
 const BASE = 'http://localhost:8799';
 const ROOT = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/$/, '');
@@ -61,8 +62,9 @@ await new Promise((res, rej) => {
 // (terminate = network-style drop, fires close immediately) to force a
 // reconnect — pre-fix this looped on "Unknown player" forever.
 bob.ws.terminate();
-await wait(3500);
-check('D3: bob auto-reconnected despite rotated token', !!bob.ws && bob.ws.readyState === WebSocket.OPEN && bob._gotFirstState);
+check('D3: bob auto-reconnected despite rotated token',
+  await waitFor(() => !!bob.ws && bob.ws.readyState === WebSocket.OPEN && bob._gotFirstState,
+    { timeoutMs: 10000 }));
 check('D3: same seat after reconnect', bob.playerId === bobId);
 check('D3: client picked up the fresh token', !!bob.token && bob.token !== tokenA);
 check('D3: disconnect + reconnect events emitted',
@@ -80,12 +82,26 @@ await carol.joinGame(code, 'Carol');
 check('carol connected', carol._gotFirstState);
 const deadSocket = carol.ws;
 deadSocket.send = () => {}; // pings vanish; no pong ever returns — "silent death"
-await wait(4500);           // stale detection (~1.2s) + backoff (~1s±jitter) + reconnect
 check('D1: heartbeat presumed dead socket and reconnected',
-  !!carol.ws && carol.ws !== deadSocket && carol.ws.readyState === WebSocket.OPEN);
+  await waitFor(() => !!carol.ws && carol.ws !== deadSocket && carol.ws.readyState === WebSocket.OPEN,
+    { timeoutMs: 10000 }));
 check('D1: disconnect event emitted on silent death', carolEvents.includes('disconnected-from-host'));
-await wait(800);
-check('D1: pongs flowing on the replacement socket', Date.now() - carol._lastPong < 1500);
+check('D1: pongs flowing on the replacement socket',
+  await waitFor(() => Date.now() - carol._lastPong < 1000));
+
+// Regression: the replacement socket must STAY up. _startHeartbeat() returns
+// early when the timer is already running, so before the fix a reconnect kept
+// the DEAD connection's _lastPong; the next tick measured a brand-new socket
+// against that ancient timestamp and tore it down within ~one interval, over
+// and over. In production that is a phone waking from a long sleep and never
+// managing to hold a connection. Sampling once (as this test used to) could
+// land in an open moment and pass by luck — so watch it across several ticks.
+const settledSocket = carol.ws;
+await wait(carol._heartbeatIntervalMs * 4);
+check('D1 regression: replacement socket survives repeated heartbeat ticks',
+  !!settledSocket && carol.ws === settledSocket && carol.ws.readyState === WebSocket.OPEN);
+check('D1 regression: no extra disconnects after recovery',
+  carolEvents.filter(t => t === 'disconnected-from-host').length === 1);
 
 // --- Sanity: the game state is still coherent after all the churn ---
 const names = (host.getPublicState().players || []).map(p => p.name).sort();

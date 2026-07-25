@@ -206,6 +206,14 @@ class GameTransport {
       }
       this.ws = ws;
       this._intentionalClose = false;
+      // Start this socket's liveness clock now. Without this, a reconnect
+      // inherits the stale _lastPong from the connection that just died (the
+      // heartbeat timer is already running, so _startHeartbeat() returns early
+      // and never refreshes it). The very next tick would then measure a
+      // brand-new socket against an ancient timestamp and kill it before its
+      // first message arrives — a reconnect loop, most likely on a phone waking
+      // from a long sleep, which is precisely the case the heartbeat exists for.
+      this._lastPong = Date.now();
 
       // Guard against a connection that never completes.
       const timeout = setTimeout(() => {

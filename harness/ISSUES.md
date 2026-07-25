@@ -398,6 +398,40 @@ unknown-game rejection) passes against `wrangler dev`.
 
 ---
 
+## D13 🔴 Reconnect loop from stale heartbeat timestamp — RESOLVED (2026-07-25)
+**File:** `public/ws-transport.js` (`_connect` / `_startHeartbeat` / `_heartbeatTick`)
+
+Found by finally investigating a "flaky" test instead of re-running it. The
+`heartbeat-test` and `smoke` suites had been failing intermittently under full-suite
+load and were twice dismissed as timing noise. They were not.
+
+`_startHeartbeat()` returns early when the timer is already running — so on a
+**reconnect** it never refreshed `_lastPong`, and the new socket inherited the
+*dead* connection's timestamp. `_heartbeatTick()` then measured a brand-new socket
+against that ancient value, declared it dead, and tore it down — in the failing log,
+1ms after the socket opened. That reconnects, inherits the same stale timestamp, and
+loops. The only thing normally hiding it is `onmessage` refreshing `_lastPong` when
+the first server message lands: a race the test lost roughly 1 run in 5.
+
+**Production impact (worse than the test):** with the real 60s timeout, a phone that
+sleeps for minutes wakes with a `_lastPong` far past the threshold. If a tick fires
+in the window between the new socket opening and its first message arriving, it kills
+a perfectly good connection and loops with growing backoff — exactly the
+wake-from-sleep scenario the D1 heartbeat was built to fix.
+
+**Fix:** start the liveness clock when the socket is created in `_connect()`, so
+every connection attempt gets a fresh grace period.
+
+**Regression test:** `heartbeat-test` now watches the replacement socket across
+several heartbeat intervals (`survives repeated heartbeat ticks` + `no extra
+disconnects after recovery`) rather than sampling once, which could land in an open
+moment and pass by luck. Verified to fail with the fix reverted and pass with it.
+
+**Lesson recorded:** the flake *was* the bug. See the testing conventions in
+`tests/README.md`.
+
+---
+
 ## Gameplay feedback (2026-07-25)
 
 Reported after an in-person session: a quest passed and nobody at the table

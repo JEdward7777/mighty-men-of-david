@@ -1,6 +1,7 @@
 // Verifies: game code + name reclaims a seat from a "new browser" (no saved
 // token), even mid-game, restoring the same player id, role and host status.
 import WebSocket from 'ws';
+import { waitFor } from './helpers.mjs';
 
 const BASE = 'http://localhost:8799';
 const WSBASE = 'ws://localhost:8799';
@@ -32,8 +33,8 @@ const host = await connect(code, { playerId: created.playerId, token: created.to
 const players = { Alice: host };
 for (const n of ['Bob', 'Carl', 'Dave', 'Erin', 'Fran']) { players[n] = await connect(code, { name: n }); await wait(40); }
 await wait(150);
-act(host, 'start'); await wait(200);
-check('game started', host.state.phase === 'team_selection');
+act(host, 'start');
+check('game started', await waitFor(() => host.state.phase === 'team_selection'));
 
 // Capture Bob's original id + secret role BEFORE reclaiming.
 const bobId = players.Bob.identity.playerId;

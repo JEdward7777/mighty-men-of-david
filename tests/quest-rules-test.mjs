@@ -7,6 +7,7 @@
 import { JSDOM } from 'jsdom';
 import WebSocket from 'ws';
 import fs from 'fs';
+import { waitFor } from './helpers.mjs';
 
 const BASE = 'http://localhost:8799';
 const ROOT = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/$/, '');
@@ -46,12 +47,10 @@ const code = created.gameCode;
 const host = await connect(code, { playerId: created.playerId, token: created.token });
 const players = [host];
 for (const n of ['Bob', 'Carl', 'Dave', 'Erin', 'Fran']) { players.push(await connect(code, { name: n })); await wait(40); }
-await wait(150);
-check('exactly 6 players (the minimum)', host.state.playerCount === 6);
+check('exactly 6 players (the minimum)', await waitFor(() => host.state.playerCount === 6));
 
 act(host, 'start');
-await wait(200);
-check('game started', host.state.phase === 'team_selection');
+check('game started', await waitFor(() => host.state.phase === 'team_selection'));
 
 console.log('    questSizes for 6 players:', host.state.questSizes);
 check('no quest requires all 6 players', host.state.questSizes.every(size => size < 6));
@@ -67,14 +66,12 @@ const leader = players.find(p => p.identity.playerId === leaderId);
 const allSix = host.state.players.map(p => p.id);
 leader.errors = [];
 act(leader, 'propose', { team: allSix });
-await wait(200);
-check('proposing the whole table is rejected', leader.errors.some(e => /exactly 3 players/i.test(e)));
+check('proposing the whole table is rejected', await waitFor(() => leader.errors.some(e => /exactly 3 players/i.test(e))));
 check('did not advance to team_vote', host.state.phase === 'team_selection');
 
 const teamOfThree = allSix.slice(0, 3);
 act(leader, 'propose', { team: teamOfThree });
-await wait(200);
-check('correctly-sized team (3) is accepted', host.state.phase === 'team_vote');
+check('correctly-sized team (3) is accepted', await waitFor(() => host.state.phase === 'team_vote'));
 check('proposed team really is only 3', host.state.proposedTeam.length === 3);
 
 // ============ Part 2: rule explanations render on every relevant screen ============
@@ -102,13 +99,18 @@ for (const n of ['P2', 'P3', 'P4', 'P5', 'P6']) { raw[n] = await connect(code2, 
 await wait(300);
 
 w.doAction('start');
-await wait(500);
 
 const phaseHtml = () => w.document.getElementById('phase-content').innerHTML;
+// Gate on the *server's* phase (via a raw player) before asserting on the DOM.
+// The rule text alone is a useless gate: the same "even 1 Fail vote" wording
+// appears on every screen for quest 1, so waiting on it matches the screen we
+// are already looking at and races ahead of the transition.
+const phaseIs = (p) => waitFor(() => raw.P2.state?.phase === p);
 
 // Quest 1 (index 0): fail requirement is 1 -> the "even 1 Fail vote" wording.
+await phaseIs('team_selection');
 check('team selection explains the rule (quest 1)',
-  /needs.*3.*player/i.test(phaseHtml()) && /even 1 Fail vote/i.test(phaseHtml()));
+  await waitFor(() => /needs.*3.*player/i.test(phaseHtml()) && /even 1 Fail vote/i.test(phaseHtml())));
 
 // Whoever is leader proposes; advance to team_vote and check the rule shows there too.
 const anyState = raw.P2.state;
@@ -117,16 +119,18 @@ const leaderRaw = Object.values(raw).find(p => p.identity?.playerId === leaderId
 const team2 = anyState.players.slice(0, 3).map(p => p.id);
 if (leaderRaw) act(leaderRaw, 'propose', { team: team2 });
 else w.doAction('propose', { team: team2 });
-await wait(500);
-check('team vote screen explains the rule', /even 1 Fail vote/i.test(phaseHtml()));
+await phaseIs('team_vote');
+check('team vote screen explains the rule',
+  await waitFor(() => /Vote on Team/i.test(phaseHtml()) && /even 1 Fail vote/i.test(phaseHtml())));
 
 // Approve unanimously -> quest phase; rule text must still be visible there.
 w.doAction('vote', { approve: true });
-for (const n of Object.keys(raw)) { act(raw[n], 'vote', { approve: true }); await wait(40); }
-await wait(400);
+for (const n of Object.keys(raw)) { act(raw[n], 'vote', { approve: true }); }
+await phaseIs('vote_result');
 w.doAction('continueFromVote');
-await wait(400);
-check('quest phase explains the rule', /even 1 Fail vote/i.test(phaseHtml()));
+await phaseIs('quest');
+check('quest phase explains the rule',
+  await waitFor(() => /embarks on their mission/i.test(phaseHtml()) && /even 1 Fail vote/i.test(phaseHtml())));
 
 // Everyone on the team plays success -> quest_result explains WHY it passed.
 // Zara (the UI tab) submits via the UI if she's on the team; every other team
@@ -140,10 +144,10 @@ if (team2.includes(zaraId)) {
 for (const id of team2) {
   if (id === zaraId) continue;
   const p = Object.values(raw).find(p => p.identity?.playerId === id);
-  if (p) { act(p, 'questVote', { success: true }); await wait(50); }
+  if (p) act(p, 'questVote', { success: true });
 }
-await wait(600);
-check('quest result explains why it passed', /0 Fail votes played.*1 is needed to fail.*succeeded/i.test(phaseHtml()));
+check('quest result explains why it passed',
+  await waitFor(() => /0 Fail votes played.*1 is needed to fail.*succeeded/i.test(phaseHtml())));
 
 // ============ Part 3: the exact confusion that was reported ============
 // "Quest 4" (index 3) needs 2 Fail votes, not 1 — the standard Avalon twist

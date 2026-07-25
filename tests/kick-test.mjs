@@ -2,6 +2,7 @@
 // plus the guard rails (non-host can't kick, host can't be removed, no leave
 // once the game has started).
 import WebSocket from 'ws';
+import { waitFor } from './helpers.mjs';
 const BASE = 'http://localhost:8799', WSBASE = 'ws://localhost:8799';
 
 function connect(code, hello) {
@@ -33,13 +34,14 @@ const created = await mk('Alice');
 const code = created.gameCode;
 const host = await connect(code, { playerId: created.playerId, token: created.token });
 const bob = await connect(code, { name: 'Bob' }); await wait(40);
-const carl = await connect(code, { name: 'Carl' }); await wait(120);
-check('lobby has 3 players', host.state.players.length === 3);
+const carl = await connect(code, { name: 'Carl' });
+check('lobby has 3 players', await waitFor(() => host.state.players.length === 3));
 const carlId = carl.identity.playerId;
 
 // Non-host cannot kick.
 bob.errors = [];
-act(bob, 'kick', { targetId: carlId }); await wait(150);
+act(bob, 'kick', { targetId: carlId });
+await waitFor(() => bob.errors.length > 0);
 check('non-host kick rejected', bob.errors.some(e => /only the host/i.test(e)));
 
 // Host cannot be removed.
@@ -55,8 +57,8 @@ check('after Bob leaves: 2 players', host.state.players.length === 2);
 check('Bob gone from roster', !host.state.players.some(p => p.name === 'Bob'));
 
 // Host kicks Carl → removed, notified, socket closed.
-act(host, 'kick', { targetId: carlId }); await wait(250);
-check('after kick: 1 player', host.state.players.length === 1);
+act(host, 'kick', { targetId: carlId });
+check('after kick: 1 player', await waitFor(() => host.state.players.length === 1));
 check('Carl received "removed" message', !!carl.removed && /removed/i.test(carl.removed));
 check('Carl socket closed by server', carl.closed);
 
@@ -67,11 +69,11 @@ const h2 = await connect(c2, { playerId: g2.playerId, token: g2.token });
 const others = [];
 for (const n of ['P2', 'P3', 'P4', 'P5', 'P6']) { others.push(await connect(c2, { name: n })); await wait(40); }
 await wait(120);
-act(h2, 'start'); await wait(200);
-check('second game started', h2.state.phase === 'team_selection');
+act(h2, 'start');
+check('second game started', await waitFor(() => h2.state.phase === 'team_selection'));
 others[0].errors = [];
-act(others[0], 'leave'); await wait(150);
-check('leave rejected mid-game', others[0].errors.some(e => /lobby/i.test(e)));
+act(others[0], 'leave');
+check('leave rejected mid-game', await waitFor(() => others[0].errors.some(e => /lobby/i.test(e))));
 check('still 6 players mid-game', h2.state.players.length === 6);
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
