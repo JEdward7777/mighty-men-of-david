@@ -30,6 +30,7 @@ const SUITES = [
   'away-test',
   'sound-test',
   'rejoin-retry-test',
+  'quest-rules-test',
   'selection-test',   // slowest: replays games until the host draws leader
 ];
 

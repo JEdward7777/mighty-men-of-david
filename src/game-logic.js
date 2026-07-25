@@ -226,7 +226,10 @@ function getPublicGameState(game, playerId) {
     })),
     currentQuest: game.currentQuest,
     questResults: game.questResults,
-    questSizes: QUEST_SIZES,
+    // Effective sizes for this game (game.questSizes, set at start() and
+    // capped below the full player count) once known; the flat default
+    // beforehand is unused by the UI (it only appears after the game starts).
+    questSizes: game.questSizes || QUEST_SIZES,
     questFailRequirements: QUEST_FAIL_REQUIREMENTS,
     leaderIndex: game.leaderIndex,
     leaderName: game.players[game.leaderIndex]?.name,
@@ -391,12 +394,21 @@ const GameActions = {
     game.players.forEach((p, i) => {
       p.role = roles[i];
     });
-    
+
+    // Lock in this game's quest sizes now that the player count is fixed. A
+    // proposed team can never be required to be the WHOLE table — cap each
+    // quest at players.length - 1 so there's always at least one player left
+    // off, preserving genuine choice in who to pick. (Only matters at the
+    // 6-player minimum, where the standard sizes [3,4,5,6,6] would otherwise
+    // force selecting everyone on quests 4 and 5.)
+    const maxTeamSize = game.players.length - 1;
+    game.questSizes = QUEST_SIZES.map(size => Math.min(size, maxTeamSize));
+
     // Randomize leader
     game.leaderIndex = Math.floor(Math.random() * game.players.length);
     game.phase = GAME_PHASES.TEAM_SELECTION;
     this._touch(game);
-    
+
     return { success: true };
   },
   
@@ -410,7 +422,7 @@ const GameActions = {
       throw new Error('Only the leader can propose a team');
     }
     
-    const questSize = QUEST_SIZES[game.currentQuest];
+    const questSize = (game.questSizes || QUEST_SIZES)[game.currentQuest];
     if (team.length !== questSize) {
       throw new Error(`Team must have exactly ${questSize} players`);
     }

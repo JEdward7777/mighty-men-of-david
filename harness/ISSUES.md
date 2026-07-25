@@ -395,3 +395,32 @@ role-hiding → host guards → propose/vote/quest → reconnect-with-token → 
 unknown-game rejection) passes against `wrangler dev`.
 
 **Remaining:** deploy to the user's Cloudflare account and play-test with real phones.
+
+---
+
+## Gameplay feedback (2026-07-25)
+
+Reported after an in-person session: a quest passed and nobody at the table
+understood why (almost certainly the 4th quest, which needs **2** Fail votes
+instead of the usual 1 — easy to miss without it being spelled out anywhere).
+Two fixes, both requested directly by the owner:
+
+1. **No quest can ever require selecting the whole table.** `GameActions.start()`
+   now caps each quest's team size at `players.length - 1` (only matters at the
+   6-player minimum, where the standard sizes `[3,4,5,6,6]` would otherwise force
+   the leader to pick literally everyone on quests 4 and 5 — those become 5).
+   `propose()` and the public state use the per-game `game.questSizes`, computed
+   once at start and locked in for that game.
+2. **The pass/fail rule is now explained in plain text** on every screen involved
+   in a quest — team selection, team vote, and the quest itself ("Quest 4 needs
+   5 players — it takes 2 Fail votes to fail this quest — a single Fail will not
+   fail it.") — and the result screen states exactly what happened against that
+   threshold ("1 Fail vote played — 2 are needed to fail — so this quest
+   succeeded.").
+
+Verified with `tests/quest-rules-test.mjs` (17 assertions): a 6-player game's
+quest sizes are `[3,4,5,5,5]`, proposing all 6 players is rejected, the rule text
+renders correctly for both the 1-fail and 2-fail-required cases, and the result
+explanation matches the actual vote counts. Full regression suite otherwise green
+(one known-flaky, unrelated timing assertion in `smoke` reproduced 1-in-5 in
+isolation and is documented in `tests/README.md`; not caused by this change).
